@@ -16,7 +16,7 @@ export async function onRequestGet({ request, env }) {
     const orders = await loadOrders(env);
     const mockups = await mockupUrlsFor(env, orders);
     const out = orders.map((o) => {
-      const { opportunityId, misprintDetails, artworkUrl, ...rest } = o;
+      const { misprintDetails, artworkUrl, ...rest } = o;
       return Object.assign(rest, { hasMockup: mockups.has(o.id), misprintNotes: existingNotes(misprintDetails) });
     });
     return json({ orders: out, at: new Date().toISOString() });

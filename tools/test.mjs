@@ -312,6 +312,8 @@ await test("Mockup: card + big picture at once = one download; a web page is nev
   const [a, b] = await Promise.all([get(), get()]);
   ok(a.status === 200 && b.status === 200, "both get the picture");
   ok(a.headers.get("Content-Type") === "image/jpeg", "as an image");
+  const [ab, bb] = await Promise.all([a.arrayBuffer(), b.arrayBuffer()]);
+  ok(ab.byteLength === 6 && bb.byteLength === 6, "each answer has its own full copy of the picture");
   ok(calls.filter((c) => c.url.includes("file.force.com")).length === 1, "only ONE download from Salesforce");
   let r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000002AAA", null, cookie), env });
   ok(r.status === 404, "order with no artwork link -> 404");
