@@ -6,7 +6,7 @@
 import { json, errorResponse } from "./_sf.js";
 import { requireUser } from "./_session.js";
 import { loadOrders } from "./_orders.js";
-import { mockupUrlsFor } from "./_mockup.js";
+import { mockupUrlsFor, mockupFilesFor } from "./_mockup.js";
 import { existingNotes } from "./misprints.js";
 
 export async function onRequestGet({ request, env }) {
@@ -14,10 +14,12 @@ export async function onRequestGet({ request, env }) {
   if (auth.response) return auth.response;
   try {
     const orders = await loadOrders(env);
-    const mockups = await mockupUrlsFor(env, orders);
+    const [links, files] = await Promise.all([mockupUrlsFor(env, orders), mockupFilesFor(env, orders)]);
     const out = orders.map((o) => {
       const { misprintDetails, artworkUrl, ...rest } = o;
-      return Object.assign(rest, { hasMockup: mockups.has(o.id), misprintNotes: existingNotes(misprintDetails) });
+      // Pictures attached to the order (its Files list) come first; the Artwork URL file is the fallback.
+      const n = (files.get(o.id) || []).length || (links.has(o.id) ? 1 : 0);
+      return Object.assign(rest, { hasMockup: n > 0, mockupCount: n, misprintNotes: existingNotes(misprintDetails) });
     });
     return json({ orders: out, at: new Date().toISOString() });
   } catch (err) {

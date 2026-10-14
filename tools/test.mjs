@@ -87,8 +87,19 @@ globalThis.fetch = async (url, init = {}) => {
     }
     if (/FROM OrderItem/.test(q)) return res(200, { done: true, records: db.items.filter((i) => q.includes(i.OrderId)) });
     if (/FROM Order_Packaging__c/.test(q)) return res(200, { done: true, records: db.boxes.filter((b) => q.includes(b.Order__c)) });
+    if (/FROM ContentDocumentLink/.test(q)) {
+      if (!behave.files) return res(200, { done: true, records: [] });
+      return res(200, { done: true, records: [
+        { LinkedEntityId: "801000000000001AAA", ContentDocumentId: "069000000000002AAA", ContentDocument: { Title: "Ivory proof", LatestPublishedVersionId: "068000000000002AAA" } },
+        { LinkedEntityId: "801000000000001AAA", ContentDocumentId: "069000000000001AAA", ContentDocument: { Title: "Green proof", LatestPublishedVersionId: "068000000000001AAA" } },
+      ] });
+    }
     if (/FROM Design__c/.test(q)) return res(200, { done: true, records: db.designs.filter((d) => q.includes(d.Opportunity__c)) });
     return res(200, { done: true, records: [] });
+  }
+  if (u.pathname.endsWith("/VersionData")) {
+    const tag = u.pathname.includes("068000000000002AAA") ? 2 : 1;
+    return new Response(new Uint8Array([0xff, 0xd8, 0xff, tag]), { status: 200, headers: { "Content-Type": "application/octetstream" } });
   }
   if (u.pathname.endsWith("/sobjects/Order_Packaging__c/describe")) {
     return res(200, { fields: [{ name: "Packaging_Type__c", picklistValues: [
@@ -335,6 +346,23 @@ await test("Mockup: an Illustrator file with a PDF inside is passed on as a PDF;
   behave.artEps = true;
   r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA", null, cookie2), env: env2 });
   ok(r.status === 502, "EPS with no PDF copy -> 502");
+});
+
+await test("Mockup: pictures in the order's Files list come first, newest first; Artwork URL is the fallback", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  behave.files = true;
+  const ordersMod = await mod("orders");
+  const lr = await ordersMod.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  const ld = await lr.json();
+  ok(ld.orders[0].mockupCount === 2 && ld.orders[0].hasMockup === true, "order with 2 attached JPGs -> mockupCount 2");
+  const get = (n) => mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA&n=" + n, null, cookie), env });
+  let r = await get(0); let b = new Uint8Array(await r.arrayBuffer());
+  ok(r.status === 200 && r.headers.get("Content-Type") === "image/jpeg" && b[3] === 2, "n=0 -> the newest attached picture");
+  r = await get(1); b = new Uint8Array(await r.arrayBuffer());
+  ok(r.status === 200 && b[3] === 1, "n=1 -> the next one");
+  r = await get(2);
+  ok(r.status === 404, "n past the end -> 404");
+  ok(!calls.some((c) => c.url.includes("file.force.com")), "Artwork URL not used when files exist");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

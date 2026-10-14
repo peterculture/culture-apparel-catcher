@@ -33,8 +33,9 @@ Pages project, its own Salesforce connection and its own PIN list.
 - Every save first re-checks that the order is still In Production for screen print.
 - Salesforce's own error message (for example a validation rule) is shown to the catcher.
 - A failed Salesforce read is shown as an error, never as an empty list.
-- The browser never sees Salesforce credentials or stored file links. Mockups
-  (`Order.Artwork_URL__c`) are fetched by the server, and only for orders the app is
+- The browser never sees Salesforce credentials or stored file links. Mockups are the
+  JPG/PNG pictures in the Order's **Files** list (newest first; the big view flips
+  between them). If an order has none, `Order.Artwork_URL__c` is used instead. Both are fetched by the server, and only for orders the app is
   allowed to show. The server checks what a file really is from its first bytes and
   only passes on JPG/PNG/GIF/WebP pictures and PDFs. Adobe Illustrator (.ai) files
   saved "PDF Compatible" (Illustrator's default) are PDFs inside, so they count as PDFs.

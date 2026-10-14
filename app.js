@@ -260,8 +260,10 @@
   }
 
   /** Resolves to a picture Blob, null when the order has no mockup; rejects when it failed. */
-  function fetchMock(id) {
-    return fetch("/api/mockup?orderId=" + encodeURIComponent(id), { credentials: "same-origin" }).then(function (resp) {
+  /** key = "orderId:n" (n = which picture, 0 = newest). */
+  function fetchMock(key) {
+    var parts = key.split(":");
+    return fetch("/api/mockup?orderId=" + encodeURIComponent(parts[0]) + "&n=" + (parseInt(parts[1], 10) || 0), { credentials: "same-origin" }).then(function (resp) {
       if (resp.status === 401) { signedOut(); return null; }
       if (resp.status === 404) return null;
       if (!resp.ok) throw new Error("mockup " + resp.status);
@@ -296,7 +298,7 @@
     var keep = {};
     state.orders.forEach(function (o) { keep[o.id] = 1; });
     Object.keys(mocks).forEach(function (id) {
-      if (!keep[id]) { if (mocks[id].url) URL.revokeObjectURL(mocks[id].url); delete mocks[id]; }
+      if (!keep[id.split(":")[0]]) { if (mocks[id].url) URL.revokeObjectURL(mocks[id].url); delete mocks[id]; }
     });
   }
 
@@ -346,7 +348,7 @@
   function listHtml() {
     var cards = state.orders.map(function (o) {
       var sel = o.id === state.selId;
-      var thumb = o.hasMockup ? '<img class="thumb-img" alt="" data-mock="' + esc(o.id) + '"><span class="mock-wait">' + ICON.shirt + "</span>" : ICON.shirt;
+      var thumb = o.hasMockup ? '<img class="thumb-img" alt="" data-mock="' + esc(o.id) + ':0"><span class="mock-wait">' + ICON.shirt + "</span>" : ICON.shirt;
       return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" aria-pressed="' + sel + '">' +
         '<span class="thumb">' + thumb + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
@@ -375,7 +377,7 @@
     if (!o) return '<main class="detail"><div class="empty">Pick an order on the left.</div></main>';
     var boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
     var mock = o.hasMockup
-      ? '<button class="mock" data-act="mock" data-id="' + esc(o.id) + '" aria-label="Open the mockup full size"><img class="mock-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + '"><span class="mock-wait mock-none">LOADING<br>MOCKUP…</span><span class="badge">' + ICON.expand + '</span><span class="cap">TAP TO ENLARGE</span></button>'
+      ? '<button class="mock" data-act="mock" data-id="' + esc(o.id) + '" aria-label="Open the mockup full size"><img class="mock-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + ':0"><span class="mock-wait mock-none">LOADING<br>MOCKUP…</span><span class="badge">' + ICON.expand + '</span><span class="cap">' + ((o.mockupCount || 1) > 1 ? "TAP TO SEE ALL " + o.mockupCount : "TAP TO ENLARGE") + '</span></button>'
       : '<div class="mock"><span class="mock-none">NO MOCKUP<br>IN SALESFORCE</span></div>';
     var lines = o.lines.map(function (l) {
       return '<div><div class="line-head"><span>' + esc(l.product) + (l.color ? " · " + esc(l.color) : "") + '</span><span class="tot">' + l.total + "</span></div>" +
@@ -474,12 +476,14 @@
   }
 
   function viewerHtml(o) {
+    var count = o.mockupCount || 1, i = Math.min(state.mockIdx || 0, count - 1);
+    var flip = count > 1 ? '<div class="vzoom" role="group" aria-label="Which mockup"><button data-act="v-prev" aria-label="Previous mockup"' + (i <= 0 ? " disabled" : "") + '>‹</button><span>' + (i + 1) + " / " + count + '</span><button data-act="v-next" aria-label="Next mockup"' + (i >= count - 1 ? " disabled" : "") + ">›</button></div>" : "";
     return '<div class="viewer" role="dialog" aria-label="Mockup full size">' +
-      '<div class="viewer-bar"><div class="t"><b>' + esc(o.num) + " · MOCKUP</b><span>" + esc(o.customer) + "</span></div>" +
+      '<div class="viewer-bar"><div class="t"><b>' + esc(o.num) + " · MOCKUP</b><span>" + esc(o.customer) + "</span></div>" + flip +
       '<div class="vzoom" role="group" aria-label="Mockup zoom"><button data-act="v-out" aria-label="Zoom out">−</button><span id="v-pct">100%</span><button data-act="v-in" aria-label="Zoom in">+</button></div>' +
       '<button class="vbtn" data-act="v-fit">FIT</button>' +
       '<button class="vbtn vclose" data-act="close">' + ICON.x + "CLOSE</button></div>" +
-      '<div class="stage" id="stage"><img id="v-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + '"><span class="mock-wait mock-none">LOADING MOCKUP…</span>' +
+      '<div class="stage" id="stage"><img id="v-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + ":" + i + '"><span class="mock-wait mock-none">LOADING MOCKUP…</span>' +
       '<span class="tip">Pinch or double-tap to zoom · drag to move around</span></div></div>';
   }
 
@@ -652,7 +656,9 @@
     reload: function () { loadOrders(); },
     pick: function (el) { state.selId = el.getAttribute("data-id"); state.view = "detail"; renderMain(); },
     back: function () { state.view = "list"; applyZoom(); },
-    mock: function () { state.sheet = "mock"; renderOverlay(); },
+    mock: function () { state.mockIdx = 0; state.sheet = "mock"; renderOverlay(); },
+    "v-prev": function () { state.mockIdx = Math.max(0, (state.mockIdx || 0) - 1); renderOverlay(); },
+    "v-next": function () { var o = current(); state.mockIdx = Math.min(((o && o.mockupCount) || 1) - 1, (state.mockIdx || 0) + 1); renderOverlay(); },
     "open-box": function () {
       if (!state.boxTypes.length) api("GET", "/api/box-types").then(function (r) { if (r.ok) { state.boxTypes = r.data.types || []; renderOverlay(); } });
       var def = state.boxTypes.filter(function (t) { return t.isDefault; })[0];

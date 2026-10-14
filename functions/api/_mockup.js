@@ -25,6 +25,42 @@ const PUBLIC_LINK_RE = /\/sfc\/p\/[a-zA-Z0-9]+\/a\/([a-zA-Z0-9]{12,15})(?:[/?#]|
 const MAX_BYTES = 40 * 1024 * 1024; // Illustrator files run larger than pictures
 const MAX_REDIRECTS = 3;
 
+/**
+ * orderId -> [{ cv, title }] : picture files attached to each order (the Order's
+ * Files list), newest first. These are the shop's shirt mockups (JPG proofs).
+ * A failure here is logged and treated as "no files", so the order list never breaks.
+ */
+export async function mockupFilesFor(env, orders) {
+  const map = new Map();
+  const ids = orders.map((o) => o.id).filter((id) => SAFE_ID.test(id));
+  if (!ids.length) return map;
+  try {
+    const rows = await runQuery(env,
+      "SELECT LinkedEntityId, ContentDocumentId, ContentDocument.Title, ContentDocument.LatestPublishedVersionId " +
+      `FROM ContentDocumentLink WHERE LinkedEntityId IN (${ids.map(soqlQuote).join(",")}) ` +
+      "AND ContentDocument.FileType IN ('JPG','JPEG','PNG','GIF','WEBP') " +
+      "ORDER BY ContentDocument.ContentModifiedDate DESC");
+    for (const r of rows) {
+      const cv = r.ContentDocument && r.ContentDocument.LatestPublishedVersionId;
+      if (!cv || !SAFE_ID.test(cv)) continue;
+      if (!map.has(r.LinkedEntityId)) map.set(r.LinkedEntityId, []);
+      const list = map.get(r.LinkedEntityId);
+      if (list.length < 6 && !list.some((f) => f.cv === cv)) list.push({ cv, title: (r.ContentDocument.Title || "").slice(0, 80) });
+    }
+  } catch (err) {
+    console.error("mockup files lookup failed", err && err.code, err && err.message);
+  }
+  return map;
+}
+
+/** One attached picture file, by ContentVersion id. Returns { type, bytes } or null. */
+export async function fetchFileMockup(env, cvId) {
+  if (!SAFE_ID.test(cvId)) return null;
+  const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/ContentVersion/${encodeURIComponent(cvId)}/VersionData`);
+  if (!resp.ok) { console.error("mockup: file fetch failed", resp.status); return null; }
+  return readPicture(resp, "order file");
+}
+
 /** orderId -> stored mockup link, for the orders given. No picture is not an error. */
 export async function mockupUrlsFor(env, orders) {
   const map = new Map();
