@@ -203,12 +203,27 @@
   /* A mockup that won't show as a picture (a PDF, or a dead link): say so plainly.
      A PDF still opens in the tablet's own viewer when tapped. */
   function wireImages() {
+    // A picture that fails once gets one more try a moment later (the server may
+    // still have been fetching it from Salesforce); after that, the shirt icon.
     Array.prototype.forEach.call($app.querySelectorAll("img.thumb-img"), function (img) {
-      img.addEventListener("error", function () { img.parentNode.innerHTML = ICON.shirt; });
+      img.addEventListener("error", function () {
+        if (!img.dataset.retried) {
+          img.dataset.retried = "1";
+          setTimeout(function () { img.src = img.src.split("&r=")[0] + "&r=" + Date.now(); }, 2500);
+        } else if (img.parentNode) {
+          img.parentNode.innerHTML = ICON.shirt;
+        }
+      });
     });
     var big = $app.querySelector("img.mock-img");
     if (big) big.addEventListener("error", function () {
+      if (!big.dataset.retried) {
+        big.dataset.retried = "1";
+        setTimeout(function () { big.src = big.src.split("&r=")[0] + "&r=" + Date.now(); }, 2500);
+        return;
+      }
       var btn = big.parentNode;
+      if (!btn) return;
       btn.setAttribute("data-act", "mock-open");
       btn.setAttribute("aria-label", "Open the artwork file");
       btn.innerHTML = '<span class="mock-none">ARTWORK FILE<br>TAP TO OPEN</span>';
