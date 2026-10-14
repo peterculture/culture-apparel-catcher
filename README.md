@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/33454126/README.md)
 # Dryer Catch — Culture Apparel
 
 A tablet app for the catchers at the end of the screen-print dryers. It is a separate
@@ -89,7 +90,6 @@ but without those two protections.
    - Order Product (OrderItem): Read on `Size__c`, `Color__c`, Quantity, and the Product name.
    - Order Packaging (`Order_Packaging__c`): Read + Create, with Edit on Name,
      `Order__c`, `Packaging_Type__c` and `Packaging_Quantity__c`.
-   - Design (`Design__c`): Read on `Opportunity__c` and `Mockup_URL__c` (fallback only).
    - Mockups come from `Order.Artwork_URL__c`, a public file link, so no file access is needed.
 
 ## Tests
