@@ -173,9 +173,11 @@ await test("Orders list", async () => {
   ok(o.lines.length === 1 && o.lines[0].sizes.map((s) => s.size).join(",") === "S,M,L", "sizes sorted S,M,L; setup line left out");
   ok(o.total === 56, "garment total 56");
   ok(o.boxes.length === 1 && o.boxes[0].qty === 30, "existing box listed");
-  ok(o.hasMockup === true && data.orders[1].hasMockup === false, "mockup flag");
+  ok(o.hasMockup === true && data.orders[1].hasMockup === false, "mockup flag from Artwork_URL__c");
+  ok(!calls.some((c) => /Design__c/.test(decodeURIComponent(c.url))), "never reads Design__c");
+  ok(!calls.some((c) => /OpportunityId/.test(decodeURIComponent(c.url))), "never reads the Opportunity link");
   ok(data.orders[1].misprintNotes === "stained M (Dev 10/13)", "misprint notes without the heading");
-  ok(!("misprintDetails" in o) && !("opportunityId" in o) && !("artworkUrl" in o), "internal fields (incl. the artwork link) not sent to the tablet");
+  ok(!("misprintDetails" in o) && !("artworkUrl" in o), "internal fields (incl. the artwork link) not sent to the tablet");
   ok(!JSON.stringify(data).includes("file.force.com"), "no stored file link reaches the tablet");
 });
 
