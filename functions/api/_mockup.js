@@ -6,8 +6,8 @@
  *      (https://cultureapparel.file.force.com/sfc/dist/version/download/?oid=..&ids=068..&d=..).
  *      Every In Production screen-print order had one. Fetched as-is: the link is
  *      public, so the app's Salesforce user needs no access to the file itself.
- *   2. Fallback: the newest Design__c.Mockup_URL__c on the order's Opportunity
- *      (empty on every Production design checked, kept in case that changes).
+ *   (Design__c.Mockup_URL__c was empty on every Production design checked, and
+ *   reading Designs would need Opportunity access, so it is not used.)
  *
  * The browser never receives the stored link. It asks /api/mockup?orderId=...
  * and this server fetches the picture, so:
@@ -25,22 +25,10 @@ const PUBLIC_LINK_RE = /\/sfc\/p\/[a-zA-Z0-9]+\/a\/([a-zA-Z0-9]{12,15})(?:[/?#]|
 const MAX_BYTES = 15 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 
-/** orderId -> stored mockup link, for the orders given. Never throws: no picture is not an error. */
+/** orderId -> stored mockup link, for the orders given. No picture is not an error. */
 export async function mockupUrlsFor(env, orders) {
   const map = new Map();
   for (const o of orders) if (o.artworkUrl && /^https:\/\//i.test(o.artworkUrl)) map.set(o.id, o.artworkUrl);
-  const opps = [...new Set(orders.filter((o) => !map.has(o.id)).map((o) => o.opportunityId).filter((id) => id && SAFE_ID.test(id)))];
-  if (!opps.length) return map;
-  try {
-    const recs = await runQuery(env,
-      `SELECT Opportunity__c, Mockup_URL__c FROM Design__c WHERE Opportunity__c IN (${opps.map(soqlQuote).join(",")})` +
-      ` AND Mockup_URL__c != null ORDER BY LastModifiedDate DESC`);
-    const byOpp = new Map();
-    for (const r of recs) if (!byOpp.has(r.Opportunity__c)) byOpp.set(r.Opportunity__c, r.Mockup_URL__c);
-    for (const o of orders) if (!map.has(o.id) && byOpp.has(o.opportunityId)) map.set(o.id, byOpp.get(o.opportunityId));
-  } catch (err) {
-    console.error("mockup lookup failed", err && err.message);
-  }
   return map;
 }
 
