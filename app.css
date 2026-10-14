@@ -199,3 +199,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 .notes { font: 500 1rem/1.45 'Archivo'; color: var(--text-secondary); background: var(--warn-bg); border: 1px solid #5E4214; border-radius: .75rem; padding: .8rem 1rem; white-space: pre-wrap; }
 .toast.top { top: calc(78px + .9rem); bottom: auto; }
 .who[hidden] { display: none; }
+
+/* ---------- mockups: hidden until the picture is ready ---------- */
+img[data-mock]:not(.ready) { display: none; }
+img[data-mock].ready + .mock-wait { display: none; }
+.thumb .mock-wait { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: .55; }
+.mock-wait.mock-none { animation: mockPulse 1.4s ease-in-out infinite; }
+@keyframes mockPulse { 50% { opacity: .45; } }

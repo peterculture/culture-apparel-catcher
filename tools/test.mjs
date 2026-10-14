@@ -70,6 +70,8 @@ globalThis.fetch = async (url, init = {}) => {
   if (url.includes("file.force.com/sfc/dist/")) {
     await new Promise((r) => setTimeout(r, 30));
     if (behave.artHtml) return new Response("<html>preview</html>", { status: 200, headers: { "Content-Type": "text/html" } });
+    if (behave.artAi) return new Response(new TextEncoder().encode("%PDF-1.6\n%\u00e2\u00e3 illustrator body"), { status: 200, headers: { "Content-Type": "application/postscript" } });
+    if (behave.artEps) return new Response(new TextEncoder().encode("%!PS-Adobe-3.0 EPSF-3.0\n"), { status: 200, headers: { "Content-Type": "application/postscript" } });
     return new Response(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]), { status: 200, headers: { "Content-Type": "image/jpeg" } });
   }
   if (url.endsWith("/services/oauth2/token")) return res(200, { access_token: "TOKEN", instance_url: "https://ca.my.salesforce.com" });
@@ -322,6 +324,17 @@ await test("Mockup: card + big picture at once = one download; a web page is nev
   ok(r.status === 502, "a link that answers with a web page -> 502, page not passed on");
   r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA"), env });
   ok(r.status === 401, "not signed in -> 401");
+});
+
+await test("Mockup: an Illustrator file with a PDF inside is passed on as a PDF; an old EPS is not", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  behave.artAi = true;
+  let r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA", null, cookie), env });
+  ok(r.status === 200 && r.headers.get("Content-Type") === "application/pdf", ".ai (labelled postscript) -> application/pdf");
+  reset(); const env2 = ENV(); const cookie2 = await signIn(env2);
+  behave.artEps = true;
+  r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA", null, cookie2), env: env2 });
+  ok(r.status === 502, "EPS with no PDF copy -> 502");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

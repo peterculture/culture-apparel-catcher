@@ -145,6 +145,7 @@
         state.loaded = true;
         state.loadError = "";
         if (!current()) state.selId = state.orders.length ? state.orders[0].id : null;
+        dropOldMocks();
         setConn("live");
       } else {
         // Keep showing what we had; say plainly that it may be out of date.
@@ -200,35 +201,132 @@
     applyZoom();
   }
 
-  /* A mockup that won't show as a picture (a PDF, or a dead link): say so plainly.
-     A PDF still opens in the tablet's own viewer when tapped. */
-  function wireImages() {
-    // A picture that fails once gets one more try a moment later (the server may
-    // still have been fetching it from Salesforce); after that, the shirt icon.
-    Array.prototype.forEach.call($app.querySelectorAll("img.thumb-img"), function (img) {
-      img.addEventListener("error", function () {
-        if (!img.dataset.retried) {
-          img.dataset.retried = "1";
-          setTimeout(function () { img.src = img.src.split("&r=")[0] + "&r=" + Date.now(); }, 2500);
-        } else if (img.parentNode) {
-          img.parentNode.innerHTML = ICON.shirt;
-        }
+  /* ----------------------------------------------------------- mockups --- */
+  // Each order's mockup is fetched ONCE and turned into one picture that the small
+  // card, the big picture and the zoom viewer all share. JPG/PNG are used as they
+  // are. PDFs -- and Illustrator (.ai) files, which carry a PDF copy inside -- are
+  // drawn into a picture right here on the tablet by pdf.js (kept in /vendor, so
+  // nothing is loaded from outside servers).
+  var mocks = {};                 // orderId -> { url, failed, at, promise }
+  var pdfLib = null, pdfQueue = Promise.resolve();
+  var MOCK_PX = 2000;             // longest side of a drawn PDF: sharp when zoomed, light on memory
+
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function loadPdfJs() {
+    if (pdfLib) return pdfLib;
+    pdfLib = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = "/vendor/pdf.min.js";
+      s.onload = function () {
+        var lib = window.pdfjsLib;
+        if (!lib) { pdfLib = null; return reject(new Error("pdf.js missing")); }
+        lib.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.js";
+        resolve(lib);
+      };
+      s.onerror = function () { pdfLib = null; reject(new Error("pdf.js did not load")); };
+      document.head.appendChild(s);
+    });
+    return pdfLib;
+  }
+
+  /** First page of a PDF -> a JPEG picture (Blob). One at a time: artwork files are heavy for a tablet. */
+  function pdfToPicture(buf) {
+    var job = pdfQueue.then(function () {
+      return loadPdfJs().then(function (lib) {
+        return lib.getDocument({ data: new Uint8Array(buf), isEvalSupported: false }).promise;
+      }).then(function (doc) {
+        var done = function (v) { try { doc.destroy(); } catch (e) {} return v; };
+        return doc.getPage(1).then(function (page) {
+          var base = page.getViewport({ scale: 1 });
+          var vp = page.getViewport({ scale: Math.min(6, MOCK_PX / Math.max(base.width, base.height)) });
+          var canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+          var ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
+            return new Promise(function (resolve, reject) {
+              canvas.toBlob(function (blob) {
+                canvas.width = canvas.height = 0;  // give the memory back straight away
+                if (blob) resolve(blob); else reject(new Error("could not make a picture"));
+              }, "image/jpeg", 0.9);
+            });
+          });
+        }).then(done, function (err) { done(); throw err; });
       });
     });
-    var big = $app.querySelector("img.mock-img");
-    if (big) big.addEventListener("error", function () {
-      if (!big.dataset.retried) {
-        big.dataset.retried = "1";
-        setTimeout(function () { big.src = big.src.split("&r=")[0] + "&r=" + Date.now(); }, 2500);
-        return;
-      }
-      var btn = big.parentNode;
-      if (!btn) return;
-      btn.setAttribute("data-act", "mock-open");
-      btn.setAttribute("aria-label", "Open the artwork file");
-      btn.innerHTML = '<span class="mock-none">ARTWORK FILE<br>TAP TO OPEN</span>';
+    pdfQueue = job.catch(function () {});
+    return job;
+  }
+
+  /** Resolves to a picture Blob, null when the order has no mockup; rejects when it failed. */
+  function fetchMock(id) {
+    return fetch("/api/mockup?orderId=" + encodeURIComponent(id), { credentials: "same-origin" }).then(function (resp) {
+      if (resp.status === 401) { signedOut(); return null; }
+      if (resp.status === 404) return null;
+      if (!resp.ok) throw new Error("mockup " + resp.status);
+      var type = (resp.headers.get("Content-Type") || "").split(";")[0].trim();
+      return resp.arrayBuffer().then(function (buf) {
+        if (/^image\//.test(type)) return new Blob([buf], { type: type });
+        if (type === "application/pdf") return pdfToPicture(buf);
+        throw new Error("mockup type " + type);
+      });
     });
   }
+
+  function getMock(id) {
+    var m = mocks[id];
+    if (m && m.url) return Promise.resolve(m.url);
+    if (m && m.promise) return m.promise;
+    if (m && m.failed && Date.now() - m.at < 60000) return Promise.resolve(null);  // try again after a minute
+    m = mocks[id] = { url: null, failed: false, at: Date.now(), promise: null };
+    // A failure gets one more try a moment later (the server may still be fetching it from Salesforce).
+    m.promise = fetchMock(id).catch(function () { return wait(2500).then(function () { return fetchMock(id); }); })
+      .then(function (blob) {
+        m.promise = null;
+        if (!blob) { m.failed = true; m.at = Date.now(); return null; }
+        m.url = URL.createObjectURL(blob);
+        return m.url;
+      }, function () { m.promise = null; m.failed = true; m.at = Date.now(); return null; });
+    return m.promise;
+  }
+
+  /** Free pictures of orders that have left the list. */
+  function dropOldMocks() {
+    var keep = {};
+    state.orders.forEach(function (o) { keep[o.id] = 1; });
+    Object.keys(mocks).forEach(function (id) {
+      if (!keep[id]) { if (mocks[id].url) URL.revokeObjectURL(mocks[id].url); delete mocks[id]; }
+    });
+  }
+
+  function showMock(img, url) {
+    if (url) { img.src = url; img.classList.add("ready"); return; }
+    var box = img.parentNode;
+    if (!box) return;
+    if (img.classList.contains("thumb-img")) { box.innerHTML = ICON.shirt; return; }
+    if (img.id === "v-img") { box.innerHTML = '<span class="mock-none">THE MOCKUP FILE<br>CAN\'T BE SHOWN</span>'; return; }
+    // The big picture: no longer tappable, and says why.
+    box.removeAttribute("data-act");
+    box.setAttribute("aria-label", "Mockup can't be shown");
+    box.innerHTML = '<span class="mock-none">MOCKUP FILE<br>CAN\'T BE SHOWN</span>';
+  }
+
+  /** Fill every mockup <img data-mock="orderId"> inside root. */
+  function fillMockups(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("img[data-mock]"), function (img) {
+      var id = img.getAttribute("data-mock");
+      if (mocks[id] && mocks[id].url) { showMock(img, mocks[id].url); return; }
+      getMock(id).then(function (url) {
+        // The screen may have been redrawn while waiting, so fill whatever shows this order now.
+        Array.prototype.forEach.call(document.querySelectorAll('img[data-mock="' + id + '"]:not(.ready)'), function (el) {
+          if (el.isConnected) showMock(el, url);
+        });
+      });
+    });
+  }
+
+  function wireImages() { fillMockups($app); }
 
   function pinHtml() {
     var dots = "";
@@ -248,7 +346,7 @@
   function listHtml() {
     var cards = state.orders.map(function (o) {
       var sel = o.id === state.selId;
-      var thumb = o.hasMockup ? '<img class="thumb-img" alt="" loading="lazy" src=""/api/mockup?orderId=' + encodeURIComponent(o.id) + '">' : ICON.shirt;
+      var thumb = o.hasMockup ? '<img class="thumb-img" alt="" data-mock="' + esc(o.id) + '"><span class="mock-wait">' + ICON.shirt + "</span>" : ICON.shirt;
       return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" aria-pressed="' + sel + '">' +
         '<span class="thumb">' + thumb + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
@@ -277,7 +375,7 @@
     if (!o) return '<main class="detail"><div class="empty">Pick an order on the left.</div></main>';
     var boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
     var mock = o.hasMockup
-      ? '<button class="mock" data-act="mock" data-id="' + esc(o.id) + '" aria-label="Open the mockup full size"><img class="mock-img" alt="Mockup for ' + esc(o.num) + '" src="/api/mockup?orderId=' + encodeURIComponent(o.id) + '"><span class="badge">' + ICON.expand + '</span><span class="cap">TAP TO ENLARGE</span></button>'
+      ? '<button class="mock" data-act="mock" data-id="' + esc(o.id) + '" aria-label="Open the mockup full size"><img class="mock-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + '"><span class="mock-wait mock-none">LOADING<br>MOCKUP…</span><span class="badge">' + ICON.expand + '</span><span class="cap">TAP TO ENLARGE</span></button>'
       : '<div class="mock"><span class="mock-none">NO MOCKUP<br>IN SALESFORCE</span></div>';
     var lines = o.lines.map(function (l) {
       return '<div><div class="line-head"><span>' + esc(l.product) + (l.color ? " · " + esc(l.color) : "") + '</span><span class="tot">' + l.total + "</span></div>" +
@@ -381,7 +479,7 @@
       '<div class="vzoom" role="group" aria-label="Mockup zoom"><button data-act="v-out" aria-label="Zoom out">−</button><span id="v-pct">100%</span><button data-act="v-in" aria-label="Zoom in">+</button></div>' +
       '<button class="vbtn" data-act="v-fit">FIT</button>' +
       '<button class="vbtn vclose" data-act="close">' + ICON.x + "CLOSE</button></div>" +
-      '<div class="stage" id="stage"><img id="v-img" alt="Mockup for ' + esc(o.num) + '" src="/api/mockup?orderId=' + encodeURIComponent(o.id) + '">' +
+      '<div class="stage" id="stage"><img id="v-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + '"><span class="mock-wait mock-none">LOADING MOCKUP…</span>' +
       '<span class="tip">Pinch or double-tap to zoom · drag to move around</span></div></div>';
   }
 
@@ -392,7 +490,7 @@
     if (!state.user || !state.sheet || !o) { $overlay.innerHTML = ""; return; }
     if (state.sheet === "box") $overlay.innerHTML = boxSheetHtml(o);
     else if (state.sheet === "mis") $overlay.innerHTML = misSheetHtml(o);
-    else if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); setupViewer(); }
+    else if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); fillMockups($overlay); setupViewer(); }
     if (active) {
       var el = document.getElementById("mis-note");
       if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch (e) {} }
@@ -555,7 +653,6 @@
     pick: function (el) { state.selId = el.getAttribute("data-id"); state.view = "detail"; renderMain(); },
     back: function () { state.view = "list"; applyZoom(); },
     mock: function () { state.sheet = "mock"; renderOverlay(); },
-    "mock-open": function (el) { window.open("/api/mockup?orderId=" + encodeURIComponent(el.getAttribute("data-id")), "_blank", "noopener"); },
     "open-box": function () {
       if (!state.boxTypes.length) api("GET", "/api/box-types").then(function (r) { if (r.ok) { state.boxTypes = r.data.types || []; renderOverlay(); } });
       var def = state.boxTypes.filter(function (t) { return t.isDefault; })[0];

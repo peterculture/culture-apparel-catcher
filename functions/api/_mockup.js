@@ -22,7 +22,7 @@ const SF_HOST_RE = /(^|\.)(salesforce\.com|force\.com|documentforce\.com|salesfo
 const CV_ID = /(068[a-zA-Z0-9]{12,15})/;
 const CD_ID = /(069[a-zA-Z0-9]{12,15})/;
 const PUBLIC_LINK_RE = /\/sfc\/p\/[a-zA-Z0-9]+\/a\/([a-zA-Z0-9]{12,15})(?:[/?#]|$)/;
-const MAX_BYTES = 15 * 1024 * 1024;
+const MAX_BYTES = 40 * 1024 * 1024; // Illustrator files run larger than pictures
 const MAX_REDIRECTS = 3;
 
 /** orderId -> stored mockup link, for the orders given. No picture is not an error. */
@@ -71,19 +71,44 @@ async function contentVersionFor(env, raw) {
   } catch (err) {
     console.error("mockup file lookup failed", err && err.message);
   }
-  console.error("mockup: too many redirects");
+  return null;
+}
+
+/**
+ * What a file really is, from its first bytes -- not from what the server claims.
+ * Adobe Illustrator (.ai) files saved "PDF compatible" (Illustrator's default)
+ * ARE PDFs and start with "%PDF", even though Salesforce labels them
+ * application/postscript. Anything not listed here is never passed on.
+ */
+export function sniffType(bytes) {
+  const b = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 1024));
+  const head = (n, from = 0) => String.fromCharCode.apply(null, Array.from(b.subarray(from, from + n)));
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b[0] === 0x89 && head(3, 1) === "PNG") return "image/png";
+  if (head(4) === "GIF8") return "image/gif";
+  if (head(4) === "RIFF" && head(4, 8) === "WEBP") return "image/webp";
+  // "%PDF" must be within the first 1 KB (the PDF rule); usually it is at byte 0.
+  if (head(b.length).indexOf("%PDF-") >= 0) return "application/pdf";
   return null;
 }
 
 /** Pictures and PDFs only -- never hand the browser a web page. Returns { type, bytes } or null. */
 async function readPicture(resp, where) {
-  const type = (resp.headers.get("content-type") || "application/octet-stream").split(";")[0].trim();
-  if (!/^image\//i.test(type) && !/^application\/pdf$/i.test(type) && !/octet-stream/i.test(type)) {
-    console.error("mockup: not a picture", where, resp.status, type);
+  const claimed = (resp.headers.get("content-type") || "application/octet-stream").split(";")[0].trim();
+  if (/^text\//i.test(claimed) || /html|xml|json|javascript/i.test(claimed)) {
+    console.error("mockup: not a picture", where, resp.status, claimed);
     return null;
   }
   const bytes = await resp.arrayBuffer();
   if (bytes.byteLength > MAX_BYTES) { console.error("mockup: too large", where, bytes.byteLength); return null; }
+  const type = sniffType(bytes);
+  if (!type) {
+    const start = String.fromCharCode.apply(null, Array.from(new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 12))));
+    console.error(/^%!PS/.test(start) || (bytes.byteLength > 4 && new Uint8Array(bytes)[0] === 0xc5)
+      ? "mockup: Illustrator/EPS file saved without a PDF copy -- re-save it with 'Create PDF Compatible File' ticked"
+      : "mockup: not a picture", where, claimed, bytes.byteLength);
+    return null;
+  }
   return { type, bytes };
 }
 

@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/33454126/README.md)
 # Dryer Catch — Culture Apparel
 
 A tablet app for the catchers at the end of the screen-print dryers. It is a separate
@@ -36,12 +35,18 @@ Pages project, its own Salesforce connection and its own PIN list.
 - A failed Salesforce read is shown as an error, never as an empty list.
 - The browser never sees Salesforce credentials or stored file links. Mockups
   (`Order.Artwork_URL__c`) are fetched by the server, and only for orders the app is
-  allowed to show. A PDF artwork opens in the tablet's own viewer when tapped.
+  allowed to show. The server checks what a file really is from its first bytes and
+  only passes on JPG/PNG/GIF/WebP pictures and PDFs. Adobe Illustrator (.ai) files
+  saved "PDF Compatible" (Illustrator's default) are PDFs inside, so they count as PDFs.
+  The tablet draws a PDF's first page into a picture with pdf.js (`vendor/`, Mozilla,
+  Apache 2.0 licence, served from this site). An .ai/.eps saved *without* a PDF copy
+  can't be shown, and the card says so.
 
 ## Files
 
 ```
 index.html, app.css, app.js     the tablet screen (no build step)
+vendor/                         pdf.js, which draws PDF / Illustrator mockups
 _headers                        security headers
 functions/api/                  the server (Cloudflare Pages Functions)
   _sf.js                        Salesforce connection (one org, client credentials)
