@@ -19,6 +19,7 @@ const orders = await mod("orders");
 const boxes = await mod("boxes");
 const mis = await mod("misprints");
 const me = await mod("me");
+const mockup = await mod("mockup");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -66,6 +67,11 @@ const res = (status, body, headers = {}) => new Response(body == null ? null : J
 globalThis.fetch = async (url, init = {}) => {
   url = String(url); const method = (init.method || "GET").toUpperCase();
   calls.push({ url, method, body: init.body, headers: init.headers || {} });
+  if (url.includes("file.force.com/sfc/dist/")) {
+    await new Promise((r) => setTimeout(r, 30));
+    if (behave.artHtml) return new Response("<html>preview</html>", { status: 200, headers: { "Content-Type": "text/html" } });
+    return new Response(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]), { status: 200, headers: { "Content-Type": "image/jpeg" } });
+  }
   if (url.endsWith("/services/oauth2/token")) return res(200, { access_token: "TOKEN", instance_url: "https://ca.my.salesforce.com" });
   const u = new URL(url);
   if (u.pathname.endsWith("/query")) {
@@ -298,6 +304,22 @@ await test("Misprint: refused inputs save nothing", async () => {
   r = await mis.onRequestPost({ request: req("POST", "/api/misprints", Object.assign({}, base, { qty: 100, requestId: "req-hhhhhhh3" }), cookie), env });
   ok(r.status === 400, "100 at once refused");
   ok(posts("/sobjects/Order/").length === 0, "nothing written");
+});
+
+await test("Mockup: card + big picture at once = one download; a web page is never passed on", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const get = () => mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA", null, cookie), env });
+  const [a, b] = await Promise.all([get(), get()]);
+  ok(a.status === 200 && b.status === 200, "both get the picture");
+  ok(a.headers.get("Content-Type") === "image/jpeg", "as an image");
+  ok(calls.filter((c) => c.url.includes("file.force.com")).length === 1, "only ONE download from Salesforce");
+  let r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000002AAA", null, cookie), env });
+  ok(r.status === 404, "order with no artwork link -> 404");
+  behave.artHtml = true;
+  r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA", null, cookie), env });
+  ok(r.status === 502, "a link that answers with a web page -> 502, page not passed on");
+  r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA"), env });
+  ok(r.status === 401, "not signed in -> 401");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
