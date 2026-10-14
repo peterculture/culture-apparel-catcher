@@ -26,7 +26,7 @@ export function inProductionWhere(env) {
 }
 
 const ORDER_FIELDS = [
-  "Id", "OrderNumber", "GOA_Order_Number__c", "Account.Name", "OpportunityId",
+  "Id", "OrderNumber", "GOA_Order_Number__c", "Account.Name",
   "Print_Date__c", "Printer__r.Name", "Specifications_for_Printing__c",
   "TotalQtyMisprints__c", "Misprint_Details__c", "Artwork_URL__c", "LastModifiedDate",
 ];
@@ -83,7 +83,6 @@ export async function loadOrders(env, { orderId } = {}) {
       specs: plainText(o.Specifications_for_Printing__c).slice(0, 300),
       misprintTotal: Number(o.TotalQtyMisprints__c) || 0,
       misprintDetails: o.Misprint_Details__c || "",
-      opportunityId: o.OpportunityId || null,
       artworkUrl: o.Artwork_URL__c || null,
       lastModified: o.LastModifiedDate,
       lines,
