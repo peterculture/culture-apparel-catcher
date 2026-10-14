@@ -198,3 +198,4 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 .narrow .narrow-only { display: flex !important; }
 .notes { font: 500 1rem/1.45 'Archivo'; color: var(--text-secondary); background: var(--warn-bg); border: 1px solid #5E4214; border-radius: .75rem; padding: .8rem 1rem; white-space: pre-wrap; }
 .toast.top { top: calc(78px + .9rem); bottom: auto; }
+.who[hidden] { display: none; }
