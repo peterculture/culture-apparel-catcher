@@ -71,39 +71,49 @@ async function contentVersionFor(env, raw) {
   } catch (err) {
     console.error("mockup file lookup failed", err && err.message);
   }
+  console.error("mockup: too many redirects");
   return null;
 }
 
-function imageResponse(resp) {
-  const type = resp.headers.get("content-type") || "application/octet-stream";
-  // Pictures and PDFs only -- never hand the browser a web page.
-  if (!/^image\//i.test(type) && !/^application\/pdf/i.test(type) && !/octet-stream/i.test(type)) return null;
-  return new Response(resp.body, {
-    headers: { "Content-Type": type, "Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff" },
-  });
+/** Pictures and PDFs only -- never hand the browser a web page. Returns { type, bytes } or null. */
+async function readPicture(resp, where) {
+  const type = (resp.headers.get("content-type") || "application/octet-stream").split(";")[0].trim();
+  if (!/^image\//i.test(type) && !/^application\/pdf$/i.test(type) && !/octet-stream/i.test(type)) {
+    console.error("mockup: not a picture", where, resp.status, type);
+    return null;
+  }
+  const bytes = await resp.arrayBuffer();
+  if (bytes.byteLength > MAX_BYTES) { console.error("mockup: too large", where, bytes.byteLength); return null; }
+  return { type, bytes };
 }
 
-/** Fetch the picture behind a stored link. Returns a Response or null. */
+/** Fetch the picture behind a stored link. Returns { type, bytes } or null. */
 export async function fetchMockup(env, raw) {
   let isPublicDist = false;
   try { const u = new URL(raw); isPublicDist = SF_HOST_RE.test(u.hostname) && /\/sfc\/(dist|p)\//.test(u.pathname); } catch (_) {}
   const cvId = isPublicDist ? null : await contentVersionFor(env, raw);
   if (cvId) {
     const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/ContentVersion/${encodeURIComponent(cvId)}/VersionData`);
-    return resp.ok ? imageResponse(resp) : null;
+    if (!resp.ok) { console.error("mockup: ContentVersion fetch failed", resp.status); return null; }
+    return readPicture(resp, "contentversion");
   }
   let current;
   try { current = new URL(raw); } catch (_) { return null; }
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if ((current.protocol !== "https:" && current.protocol !== "http:") || blockedHost(current.hostname)) return null;
-    const resp = await fetch(current.toString(), { redirect: "manual", signal: AbortSignal.timeout(10000) });
+    const resp = await fetch(current.toString(), {
+      redirect: "manual",
+      headers: { Accept: "image/*,application/pdf;q=0.9,*/*;q=0.5" },
+      signal: AbortSignal.timeout(15000),
+    });
     if (resp.status >= 300 && resp.status < 400 && resp.headers.get("location")) {
       current = new URL(resp.headers.get("location"), current);
       continue;
     }
-    if (!resp.ok) return null;
+    if (!resp.ok) { console.error("mockup: link answered", resp.status, current.hostname, current.pathname.slice(0, 40)); return null; }
     if (Number(resp.headers.get("content-length") || 0) > MAX_BYTES) return null;
-    return imageResponse(resp);
+    return readPicture(resp, current.hostname + current.pathname.slice(0, 40));
   }
+  console.error("mockup: too many redirects");
   return null;
 }
