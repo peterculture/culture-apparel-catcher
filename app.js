@@ -21,7 +21,7 @@
     view: "list",          // narrow screens show list OR detail
     zoom: readZoom(),
     sheet: null,           // "box" | "mis" | "mock" | "fin"
-    box: null,             // { line, type, qty }
+    box: null,             // { type, cells: { "line|size": "digits" }, sel: "line|size", requestId }
     mis: null,             // { line, size, qty, reason, note }
     saving: false,
     pending: null,         // last save, so "Try again" re-sends the SAME request id
@@ -388,8 +388,8 @@
         }).join("") + "</div></div>";
     }).join("");
     var log = o.boxes.map(function (b, i) {
-      return '<div class="log-row"><span class="log-icon">' + (i + 1) + '</span><span class="log-text">Box “' + esc(b.name) + "” · " + b.qty + " garments · " + esc(b.type) +
-        '</span><span class="log-who">' + esc(b.by) + (b.at ? " · " + fmtTime(b.at) : "") + "</span></div>";
+      return '<div class="log-row"><span class="log-icon">' + (i + 1) + '</span><span class="log-text">“' + esc(b.name) + "” · " + esc(b.type) + " · " + b.qty + " garments" +
+        (b.sizes ? '<span class="log-sizes">' + esc(b.sizes) + "</span>" : "") + '</span><span class="log-who">' + esc(b.by) + (b.at ? " · " + fmtTime(b.at) : "") + "</span></div>";
     }).join("");
     var misLog = o.misprintNotes ? '<div class="sec-label" style="margin-top:.6rem">MISPRINT NOTES IN SALESFORCE</div><div class="notes">' + esc(o.misprintNotes.split(" | ").join("\n")) + "</div>" : "";
     var banner = o.inProduction ? "" : '<div class="moved-banner">' + ICON.warn +
@@ -433,42 +433,76 @@
   }
 
   /* ----------------------------------------------------------- sheets ---- */
-  function boxName(o, lineIdx) {
-    var line = o.lines[lineIdx] || o.lines[0];
-    var short = shortFor(line ? line.product : "");
-    var n = o.boxes.filter(function (b) { return String(b.name).indexOf(short + " ") === 0 || b.name === short; }).length + 1;
+  /* Box sheet. Field names follow Salesforce (Order Packaging):
+       Garment Type (Name) · Packaging Type · Quantity + Size Counted (+ the total in Packaging Quantity). */
+  function cellKey(li, size) { return li + "|" + size; }
+  function boxCounts(o, b) {
+    var out = [];
+    o.lines.forEach(function (l, li) {
+      l.sizes.forEach(function (s) {
+        var q = parseInt(b.cells[cellKey(li, s.size)] || "0", 10) || 0;
+        if (q) out.push({ line: li, size: s.size, qty: q });
+      });
+    });
+    return out;
+  }
+  function boxTotal(o, b) { return boxCounts(o, b).reduce(function (a, c) { return a + c.qty; }, 0); }
+
+  /** Garment Type, e.g. "Tees 3" -- the shop word for what's in the box, and the box number. */
+  function boxName(o, b) {
+    var used = {};
+    boxCounts(o, b).forEach(function (c) { used[shortFor(o.lines[c.line].product)] = 1; });
+    var words = Object.keys(used);
+    var short = words.length ? words.join(" + ") : shortFor(o.lines[0] ? o.lines[0].product : "");
+    var n = o.boxes.filter(function (x) { return String(x.name).indexOf(short + " ") === 0 || x.name === short; }).length + 1;
     return short + " " + n;
   }
 
+  function sizeLeft(s) {
+    return s.qty - (s.boxed || 0);
+  }
+
   function boxSheetHtml(o) {
-    var b = state.box, qty = parseInt(b.qty || "0", 10) || 0;
+    var b = state.box, total = boxTotal(o, b);
     var boxed = o.boxes.reduce(function (a, x) { return a + x.qty; }, 0);
-    var remaining = Math.max(0, o.total - boxed);
-    var last = o.boxes.length ? o.boxes[o.boxes.length - 1].qty : 0;
-    var lineChips = o.lines.length > 1 ? '<div><div class="sec-label">WHAT\'S IN THE BOX</div><div class="chips">' + o.lines.map(function (l, i) {
-      return '<button class="chip" data-act="box-line" data-i="' + i + '" aria-pressed="' + (b.line === i) + '">' + esc(l.color ? l.color + " " : "") + esc(shortFor(l.product).toLowerCase()) + "</button>";
-    }).join("") + "</div></div>" : "";
     var types = state.boxTypes.length ? state.boxTypes.map(function (t) {
       return '<button class="chip" data-act="box-type" data-v="' + esc(t.value) + '" aria-pressed="' + (b.type === t.value) + '">' + esc(t.label) + "</button>";
-    }).join("") : '<div class="hint">Box types could not be loaded. Close and try again.</div>';
+    }).join("") : '<div class="hint">Packaging types could not be loaded. Close and try again.</div>';
+    var groups = o.lines.map(function (l, li) {
+      var lineCount = 0;
+      var cells = l.sizes.map(function (s) {
+        var k = cellKey(li, s.size), v = b.cells[k] || "", q = parseInt(v || "0", 10) || 0, left = sizeLeft(s);
+        lineCount += q;
+        return '<button class="cell' + (q ? " has" : "") + (q > left ? " over" : "") + '" data-act="box-cell" data-k="' + esc(k) + '" aria-pressed="' + (b.sel === k) + '" aria-label="' + esc(s.size) + ", " + q + ' counted">' +
+          '<span class="s">' + esc(s.size) + '</span><span class="q">' + (v || "0") + '</span><span class="left">' + Math.max(0, left) + " left</span></button>";
+      }).join("");
+      return '<div class="gl"><div class="gl-head">' + esc((l.color ? l.color + " · " : "") + l.product) + "<span>" + (lineCount ? lineCount + " in box" : "") + "</span></div>" +
+        '<div class="cells">' + cells + "</div></div>";
+    }).join("");
+    if (!o.lines.length) groups = '<div class="hint">This order has no garment sizes in Salesforce, so sizes can\'t be counted. Tell a manager.</div>';
     var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "<"].map(function (k) {
       var label = k === "<" ? "⌫" : k === "C" ? "CLR" : k;
-      return '<button data-act="box-key" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '" aria-label="' + (k === "<" ? "Delete last digit" : k === "C" ? "Clear" : k) + '">' + label + "</button>";
+      return '<button data-act="box-key" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '" aria-label="' + (k === "<" ? "Delete last digit" : k === "C" ? "Clear this size" : k) + '">' + label + "</button>";
     }).join("");
-    var ready = qty > 0 && !!b.type;
-    var label = state.saving ? "SAVING TO SALESFORCE…" : ready ? "SAVE BOX " + (o.boxes.length + 1) + " · " + qty + " GARMENTS" : !b.type ? "PICK A BOX TYPE" : "ENTER GARMENT COUNT";
-    return '<div class="scrim"><div class="sheet" role="dialog" aria-label="Log a box">' +
+    var selParts = b.sel ? b.sel.split("|") : null;
+    var selLine = selParts ? o.lines[Number(selParts[0])] : null;
+    var selSize = selLine ? selLine.sizes.filter(function (s) { return s.size === selParts.slice(1).join("|"); })[0] : null;
+    var restN = selSize ? Math.max(0, sizeLeft(selSize)) : 0;
+    var ready = total > 0 && total <= 9999 && !!b.type;
+    var label = state.saving ? "SAVING TO SALESFORCE…" : ready ? "SAVE BOX " + (o.boxes.length + 1) + " · " + total + " GARMENTS" : !b.type ? "PICK A PACKAGING TYPE" : "COUNT AT LEAST ONE SIZE";
+    return '<div class="scrim"><div class="sheet wide" role="dialog" aria-label="Log a box">' +
       '<div class="sheet-head"><div class="sheet-title"><h2>LOG BOX ' + (o.boxes.length + 1) + " · " + esc(o.num) + "</h2>" +
-"<p>" + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + " saved · " + boxed + " of " + o.total + " garments boxed</p></div>" +
+      "<p>" + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + " saved · " + boxed + " of " + o.total + " garments boxed</p></div>" +
       '<button class="x" data-act="close" aria-label="Close">' + ICON.x + "</button></div>" +
-      lineChips +
-      '<div><div class="sec-label">1 · BOX TYPE</div><div class="chips">' + types + "</div></div>" +
-      '<div class="row2"><div class="grow"><div class="sec-label">2 · GARMENTS IN THIS BOX</div>' +
-      '<div class="qty-show' + (qty ? " on" : "") + '" aria-live="polite">' + (b.qty || "0") + "</div>" +
-      '<div class="quick"><button data-act="box-rest">Rest of order (' + remaining + ")</button>" +
-      (last ? '<button data-act="box-last">Same as last box (' + last + ")</button>" : "") + "</div>" +
-      '<div class="hint">Saves as <b>“' + esc(boxName(o, b.line)) + '”</b></div></div>' +
-      '<div class="pad">' + keys + "</div></div>" +
+      '<div><div class="sec-label">1 · PACKAGING TYPE</div><div class="chips">' + types + "</div></div>" +
+      '<div class="row2"><div class="grow"><div class="sec-label">2 · QUANTITY + SIZE COUNTED <span style="color:var(--text-ghost)">· TAP A SIZE, TYPE THE COUNT</span></div>' + groups + "</div>" +
+      '<div class="pad-wrap"><div class="pad-for">' + (selSize ? "COUNT FOR <b>" + esc(selSize.size) + "</b>" + (o.lines.length > 1 ? " · " + esc(selLine.color || selLine.product) : "") : "TAP A SIZE") + "</div>" +
+      '<div class="pad">' + keys + "</div>" +
+      '<div class="quick"><button data-act="box-rest"' + (selSize && restN ? "" : " disabled") + ">Rest of " + (selSize ? esc(selSize.size) : "size") + " (" + restN + ")</button>" +
+      '<button data-act="box-next"' + (selSize ? "" : " disabled") + ">Next size →</button></div></div></div>" +
+      '<div class="total-bar' + (total ? " on" : "") + '"><div><div class="l">TOTAL IN THIS BOX</div><div class="v" aria-live="polite">' + total + "</div></div>" +
+      '<div class="gt">Garment Type<b>' + esc(boxName(o, b)) + "</b></div></div>" +
+      (total > 9999 ? '<div class="fin-warn">One box can hold at most 9999 garments.</div>' : "") +
       '<button class="save' + (state.saving ? " busy" : "") + '" data-act="save-box"' + (ready && !state.saving ? "" : " disabled") + ">" +
       (state.saving ? '<span class="spin"></span>' : "") + label + "</button></div></div>";
   }
@@ -556,7 +590,7 @@
         var o = current();
         if (kind === "box" && o && r.data.box) {
           o.boxes.push(r.data.box);
-          showToast({ kind: "ok", title: "BOX SAVED", body: "“" + r.data.box.name + "” · " + r.data.box.qty + " garments · " + r.data.box.type + " is in Salesforce on " + o.num + "." });
+          showToast({ kind: "ok", title: "BOX SAVED", body: "“" + r.data.box.name + "” · " + (r.data.box.sizes ? r.data.box.sizes.replace(/ = \d+$/, "") + " · " : "") + r.data.box.qty + " garments · " + r.data.box.type + " is in Salesforce on " + o.num + "." });
         } else if (kind === "fin" && o) {
           o.finished = true; o.finishedCount = r.data.boxCount;
           showToast({ kind: "ok", title: "ORDER FINISHED", body: o.num + ": " + r.data.boxCount + (r.data.boxCount === 1 ? " box" : " boxes") + " saved as the box count in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
@@ -588,9 +622,9 @@
 
   function saveBox() {
     var o = current(), b = state.box; if (!o || !b) return;
-    var qty = parseInt(b.qty || "0", 10);
-    if (!qty || !b.type) return;
-    send("box", { orderId: o.id, type: b.type, qty: qty, name: boxName(o, b.line), requestId: b.requestId });
+    var counts = boxCounts(o, b), total = boxTotal(o, b);
+    if (!total || total > 9999 || !b.type) return;
+    send("box", { orderId: o.id, type: b.type, counts: counts, name: boxName(o, b), requestId: b.requestId });
   }
   function saveMis() {
     var o = current(), m = state.mis; if (!o || !m || !m.size || !m.reason) return;
@@ -696,7 +730,8 @@
     "open-box": function () {
       if (!state.boxTypes.length) api("GET", "/api/box-types").then(function (r) { if (r.ok) { state.boxTypes = r.data.types || []; renderOverlay(); } });
       var def = state.boxTypes.filter(function (t) { return t.isDefault; })[0];
-      state.box = { line: 0, type: def ? def.value : "", qty: "", requestId: newRequestId() };
+      var o = current(), first = o && o.lines[0] && o.lines[0].sizes[0];
+      state.box = { type: def ? def.value : "", cells: {}, sel: first ? cellKey(0, first.size) : null, requestId: newRequestId() };
       state.sheet = "box"; state.toast = null; renderToast(); renderOverlay();
     },
     "open-mis": function () {
@@ -704,18 +739,27 @@
       state.sheet = "mis"; state.toast = null; renderToast(); renderOverlay();
     },
     close: function () { if (state.saving) return; state.sheet = null; renderOverlay(); },
-    "box-line": function (el) { state.box.line = Number(el.getAttribute("data-i")); renderOverlay(); },
     "box-type": function (el) { state.box.type = el.getAttribute("data-v"); renderOverlay(); },
+    "box-cell": function (el) { state.box.sel = el.getAttribute("data-k"); renderOverlay(); },
     "box-key": function (el) {
-      var k = el.getAttribute("data-k"), v = state.box.qty || "";
+      var b = state.box; if (!b.sel) return;
+      var k = el.getAttribute("data-k"), v = b.cells[b.sel] || "";
       if (k === "C") v = ""; else if (k === "<") v = v.slice(0, -1); else if (v.length < 4) v = (v === "0" ? "" : v) + k;
-      state.box.qty = v; renderOverlay();
+      b.cells[b.sel] = v; renderOverlay();
     },
     "box-rest": function () {
-      var o = current(); var boxed = o.boxes.reduce(function (a, x) { return a + x.qty; }, 0);
-      var rest = Math.max(0, o.total - boxed); state.box.qty = rest ? String(rest) : ""; renderOverlay();
+      var o = current(), b = state.box; if (!o || !b.sel) return;
+      var p = b.sel.split("|"), line = o.lines[Number(p[0])], size = p.slice(1).join("|");
+      var s = line && line.sizes.filter(function (x) { return x.size === size; })[0];
+      if (!s) return;
+      var rest = Math.max(0, sizeLeft(s)); b.cells[b.sel] = rest ? String(rest) : ""; renderOverlay();
     },
-    "box-last": function () { var o = current(); state.box.qty = String(o.boxes[o.boxes.length - 1].qty); renderOverlay(); },
+    "box-next": function () {
+      var o = current(), b = state.box; if (!o || !b.sel) return;
+      var all = [];
+      o.lines.forEach(function (l, li) { l.sizes.forEach(function (s) { all.push(cellKey(li, s.size)); }); });
+      var i = all.indexOf(b.sel); b.sel = all[(i + 1) % all.length]; renderOverlay();
+    },
     "save-box": saveBox,
     "open-fin": function () {
       var o = current(); if (!o || !o.boxes.length) return;

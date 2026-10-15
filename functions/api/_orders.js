@@ -20,6 +20,7 @@
  * The crew is never blocked; nothing about their process changes.
  */
 import { runQuery, soqlQuote, plainText, SfError, SF_ID } from "./_sf.js";
+import { SIZE_FIELD, parseBreakdown } from "./_sizes.js";
 
 export const DEFAULT_PRINTERS = ["Culture Apparel", "Culture Apparel Press 2"];
 
@@ -87,7 +88,7 @@ export async function loadOrders(env, { orderId } = {}) {
   const ids = orders.map((o) => soqlQuote(o.Id)).join(",");
   const [items, boxes] = await Promise.all([
     runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name FROM OrderItem WHERE OrderId IN (${ids})`),
-    runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, CreatedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
+    runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, CreatedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
   ]);
 
   const result = orders.map((o) => {
@@ -106,13 +107,21 @@ export async function loadOrders(env, { orderId } = {}) {
     }
     const lines = [...groups.values()].map((g) => {
       const sizes = [...g.sizes.entries()].sort((a, b) => sizeRank(a[0]) - sizeRank(b[0]))
-        .map(([size, qty]) => ({ size, qty }));
+        .map(([size, qty]) => ({ size, qty, boxed: 0 }));
       return { product: g.product, color: g.color, sizes, total: sizes.reduce((a, s) => a + s.qty, 0) };
     });
+    // Name = "Garment Type" (e.g. "Tees 2"); Packaging_Quantity__c = the box's total;
+    // Quantity_Size_Counted__c = the size breakdown (blank on boxes logged before 10-15).
     const orderBoxes = boxes.filter((b) => b.Order__c === o.Id).map((b) => ({
       id: b.Id, name: b.Name, type: b.Packaging_Type__c || "", qty: Number(b.Packaging_Quantity__c) || 0,
+      sizes: b[SIZE_FIELD] || "", counts: parseBreakdown(lines, b[SIZE_FIELD]),
       at: b.CreatedDate, by: (b.CreatedBy && b.CreatedBy.Name) || "",
     }));
+    // How many of each size are already in a box (only boxes with a size breakdown count).
+    for (const b of orderBoxes) for (const c of b.counts) {
+      const s = lines[c.line].sizes.find((x) => x.size === c.size);
+      s.boxed += c.qty;
+    }
     return {
       id: o.Id,
       num: plainText(o.GOA_Order_Number__c) || o.OrderNumber,

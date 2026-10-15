@@ -223,3 +223,30 @@ img[data-mock].ready + .mock-wait { display: none; }
 .fin-warn { padding: .9rem 1.1rem; border-radius: .9rem; background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn-soft); font: 500 1rem/1.4 'Archivo'; }
 .save.ok { background: var(--ok-strong); }
 .save.ok.busy:disabled { background: var(--ok-strong); color: #fff; }
+
+/* ---------- box sheet: Quantity + Size Counted ---------- */
+.sheet.wide { width: min(64rem, 100%); }
+.gl { display: flex; flex-direction: column; gap: .5rem; }
+.gl + .gl { margin-top: .5rem; padding-top: .8rem; border-top: 1px solid var(--border-subtle); }
+.gl-head { display: flex; justify-content: space-between; gap: .75rem; font: 600 1rem/1.25 'Archivo'; color: var(--text-secondary); }
+.gl-head span { color: var(--text-primary); font-family: 'Oswald'; white-space: nowrap; }
+.cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.4rem, 1fr)); gap: .5rem; }
+.cell { min-height: 5.6rem; border-radius: .8rem; border: 2px solid var(--border); background: var(--surface-card); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .3rem; padding: .45rem .2rem; }
+.cell .s { font: 600 .9rem/1 'Oswald'; letter-spacing: .08em; color: var(--text-muted); }
+.cell .q { font: 700 1.9rem/1 'Oswald'; color: #4a4a52; }
+.cell .left { font: 500 .72rem/1 'Archivo'; color: var(--text-ghost); }
+.cell.has { border-color: var(--border-strong); background: #1a1a1f; }
+.cell.has .q { color: var(--text-primary); }
+.cell[aria-pressed="true"] { border-color: var(--accent); background: #2a1412; box-shadow: 0 0 0 2px var(--accent) inset; }
+.cell[aria-pressed="true"] .s { color: var(--text-primary); }
+.cell.over .left { color: var(--warn-soft); }
+.total-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.1rem; border-radius: 1rem; background: #0A0A0C; border: 2px solid var(--border); }
+.total-bar.on { border-color: var(--accent); }
+.total-bar .l { font: 600 .8rem/1 'Oswald'; letter-spacing: .14em; color: var(--text-muted); }
+.total-bar .v { font: 700 3rem/1 'Oswald'; }
+.total-bar .gt { text-align: right; font: 500 .95rem/1.35 'Archivo'; color: var(--text-tertiary); }
+.total-bar .gt b { display: block; color: var(--text-primary); font: 700 1.3rem/1.2 'Oswald'; letter-spacing: .04em; }
+.pad-wrap { display: flex; flex-direction: column; gap: .6rem; }
+.pad-for { font: 600 .85rem/1.2 'Oswald'; letter-spacing: .1em; color: var(--text-muted); text-align: center; }
+.pad-for b { color: var(--text-primary); }
+.log-sizes { display: block; margin-top: .25rem; font: 500 .9rem/1.35 'Archivo'; color: var(--text-tertiary); }

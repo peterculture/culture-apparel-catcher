@@ -11,9 +11,19 @@ Pages project, its own Salesforce connection and its own PIN list.
   - Production Status (`Order_Substatus__c`) = In Production. The stored value is `Production`.
   - Printer (`Printer__r.Name`) = "Culture Apparel" or "Culture Apparel Press 2".
   - Print Date (`Print_Date__c`) later than 10 days ago.
-- **Log Boxes:** one `Order_Packaging__c` record per box (Name such as "Tees 2", Order,
-  Packaging Type, garments in the box). This is the same record the "Enter Packaging"
-  flow creates. Box count = number of records.
+- **Log Boxes:** one `Order_Packaging__c` record per box, counted **by size**. The catcher
+  taps a size and types its count, for any garment on the order; one box can hold several garments.
+  - **Garment Type** (`Name`, relabelled 10-15): the shop word plus the box number, e.g. "Tees 2".
+  - **Packaging Type** (`Packaging_Type__c`): the box used. Unchanged.
+  - **Packaging Quantity** (`Packaging_Quantity__c`): the box's total, added up by the app from the
+    size counts so the two can't disagree. It stays a number, so reports, the dashboard and the
+    Enter Packaging flow keep working.
+  - **Quantity + Size Counted** (`Quantity_Size_Counted__c`, Text 255, added 10-15): the breakdown, e.g.
+    `S 8 · M 15 · L 17 · XL 10 = 50`, or for an order with several garments
+    `Blue Spruce Comfort Colors 1717: S 8 · M 15 | Ivory Comfort Colors 3023CL: L 4 = 27`.
+    Boxes logged before 10-15 (and by the flow or the dashboard) leave it blank and show just their total.
+  - Sizes come from the order's own lines (`OrderItem.Size__c` is free text, so there's no fixed size list).
+  - Box count = number of records.
 - **Stays on the board until counted:** once an order has been on the board, it stays
   there even if the print crew moves it to Post-Production early. It's marked
   "MOVED ON · FINISH COUNT" and listed first, until a catcher taps **FINISH CATCHING**.
@@ -59,6 +69,7 @@ functions/api/                  the server (Cloudflare Pages Functions)
   _session.js                   PIN sign-in, signed cookie, duplicate-save guard
   _orders.js                    which orders are shown, how one is read
   _mockup.js                    mockup lookup and fetch
+  _sizes.js                     Quantity + Size Counted: writing and reading the size breakdown
   login.js logout.js me.js      sign-in
   orders.js                     GET  the order list
   box-types.js                  GET  active Packaging Type values
@@ -101,7 +112,7 @@ but without those two protections.
      `Printer__c`, `Print_Date__c`, `Specifications_for_Printing__c`, `Artwork_URL__c`.
    - Order Product (OrderItem): Read on `Size__c`, `Color__c`, Quantity, and the Product name.
    - Order Packaging (`Order_Packaging__c`): Read + Create, with Edit on Name,
-     `Order__c`, `Packaging_Type__c` and `Packaging_Quantity__c`.
+     `Order__c`, `Packaging_Type__c`, `Packaging_Quantity__c` and `Quantity_Size_Counted__c`.
    - Mockups come from `Order.Artwork_URL__c`, a public file link, so no file access is needed.
 
 ## Tests

@@ -21,6 +21,7 @@ const mis = await mod("misprints");
 const me = await mod("me");
 const mockup = await mod("mockup");
 const finish = await mod("finish");
+const sizes = await mod("_sizes");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -395,6 +396,68 @@ await test("Moved to Post-Production early: stays on the board until FINISH CATC
   db.orders[0]._inProd = false;
   const l2 = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, c2), env: env2 })).json()).orders;
   ok(l2.length === 1, "never-seen Post-Production order is not shown");
+});
+
+await test("Quantity + Size Counted: written and read back", async () => {
+  const one = [{ product: "Gildan 5000 Tee", color: "Navy", sizes: [{ size: "S" }, { size: "M" }, { size: "L" }, { size: "XL" }] }];
+  let b = sizes.buildBreakdown(one, [{ line: 0, size: "L", qty: 17 }, { line: 0, size: "S", qty: 8 }, { line: 0, size: "M", qty: 15 }, { line: 0, size: "XL", qty: 10 }]);
+  ok(b.text === "S 8 · M 15 · L 17 · XL 10 = 50" && b.total === 50, "one garment: sizes in order, total 50 -> " + b.text);
+  ok(JSON.stringify(sizes.parseBreakdown(one, b.text)) === JSON.stringify([{ line: 0, size: "S", qty: 8 }, { line: 0, size: "M", qty: 15 }, { line: 0, size: "L", qty: 17 }, { line: 0, size: "XL", qty: 10 }]), "reads back the same counts");
+  const two = [{ product: "Comfort Colors 1717", color: "Blue Spruce", sizes: [{ size: "S" }, { size: "2XL" }] }, { product: "Comfort Colors 3023CL", color: "Ivory", sizes: [{ size: "L" }] }];
+  b = sizes.buildBreakdown(two, [{ line: 0, size: "S", qty: 8 }, { line: 1, size: "L", qty: 4 }, { line: 0, size: "2XL", qty: 2 }]);
+  ok(b.text === "Blue Spruce Comfort Colors 1717: S 8 · 2XL 2 | Ivory Comfort Colors 3023CL: L 4 = 14", "mixed box -> " + b.text);
+  ok(sizes.parseBreakdown(two, b.text).length === 3, "mixed box reads back");
+  ok(sizes.parseBreakdown(two, "").length === 0 && sizes.parseBreakdown(two, "Tees").length === 0, "old / hand-typed boxes -> no size counts, no error");
+  const many = Array.from({ length: 4 }, (_, i) => ({ product: "Very Long Product Name Number " + i + " Heavyweight", color: "Colour " + i, sizes: ["XS","S","M","L","XL","2XL"].map((x) => ({ size: x })) }));
+  const all = []; many.forEach((l, li) => l.sizes.forEach((x) => all.push({ line: li, size: x.size, qty: 12 })));
+  b = sizes.buildBreakdown(many, all);
+  ok(b.text.length <= 255 && b.total === 288, "long box shortens the garment words to fit 255 (" + b.text.length + ")");
+  ok(sizes.parseBreakdown(many, b.text).length === 24, "shortened box still reads back");
+  let threw = false; try { sizes.buildBreakdown(Array.from({ length: 12 }, (_, i) => ({ product: "P" + i, color: "", sizes: Array.from({ length: 8 }, (_, j) => ({ size: "SZ" + j })) })), Array.from({ length: 96 }, (_, k) => ({ line: Math.floor(k / 8), size: "SZ" + (k % 8), qty: 1000 }))); } catch (e) { threw = /Split it/.test(e.message); }
+  ok(threw, "far too many sizes -> plain 'split it into two boxes' message");
+});
+
+await test("Log a box by size: total added up by the app, both fields saved", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const post = (body, id) => boxes.onRequestPost({ request: req("POST", "/api/boxes", Object.assign({ orderId: "801000000000001AAA", type: "Standard Culture Box", name: "Tees 2", requestId: id }, body), cookie), env });
+  let r = await post({ counts: [{ line: 0, size: "S", qty: 8 }, { line: 0, size: "M", qty: 15 }, { line: 0, size: "L", qty: 0 }] }, "req-size0001");
+  const d = await r.json();
+  ok(r.status === 201 && d.box.qty === 23, "201, total 23");
+  const saved = JSON.parse(posts("/sobjects/Order_Packaging__c").pop().body);
+  ok(saved.Packaging_Quantity__c === 23, "Packaging Quantity = 23 (the total)");
+  ok(saved.Quantity_Size_Counted__c === "S 8 · M 15 = 23", "Quantity + Size Counted = 'S 8 · M 15 = 23'");
+  ok(saved.Name === "Tees 2", "Garment Type (Name) = 'Tees 2'");
+  r = await post({ counts: [{ line: 0, size: "5XL", qty: 3 }] }, "req-size0002");
+  ok(r.status === 400, "a size not on the order is refused");
+  r = await post({ counts: [{ line: 0, size: "S", qty: 0 }] }, "req-size0003");
+  ok(r.status === 400, "a box with nothing counted is refused");
+  r = await post({ counts: [{ line: 0, size: "S", qty: 2.5 }] }, "req-size0004");
+  ok(r.status === 400, "half a shirt is refused");
+  r = await post({ counts: [{ line: 0, size: "S", qty: 2 }, { line: 0, size: "S", qty: 3 }] }, "req-size0005");
+  ok(r.status === 400, "the same size twice is refused");
+  const l = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders[0];
+  const nb = l.boxes.find((b) => b.name === "Tees 2");
+  ok(nb && nb.sizes === "S 8 · M 15 = 23" && nb.counts.length === 2, "box comes back with its size counts");
+  const sz = Object.fromEntries(l.lines[0].sizes.map((x) => [x.size, x.boxed]));
+  ok(sz.S === 8 && sz.M === 15 && sz.L === 0, "boxed-so-far per size: S 8, M 15, L 0 (the old box without sizes isn't guessed at)");
+  ok(l.boxes[0].counts.length === 0 && l.boxes[0].qty === 30, "old box still shows its total of 30");
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", qty: 12, name: "Tees 3", requestId: "req-size0006" }, cookie), env });
+  const old = JSON.parse(posts("/sobjects/Order_Packaging__c").pop().body);
+  ok(r.status === 201 && old.Packaging_Quantity__c === 12 && !("Quantity_Size_Counted__c" in old), "an older tablet sending only a total still works");
+});
+
+await test("Mixed box: two garments from the order in one box", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  db.items.push({ OrderId: "801000000000001AAA", Size__c: "XL", Color__c: "Ivory", Quantity: 10, Product2: { Name: "Comfort Colors 3023CL" } });
+  const l0 = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders[0];
+  const ivory = l0.lines.findIndex((x) => x.color === "Ivory"), navy = l0.lines.findIndex((x) => x.color === "Navy");
+  const r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", name: "Tees 2", requestId: "req-mixd0001",
+    counts: [{ line: navy, size: "M", qty: 5 }, { line: ivory, size: "XL", qty: 4 }] }, cookie), env });
+  const saved = JSON.parse(posts("/sobjects/Order_Packaging__c").pop().body);
+  ok(r.status === 201 && saved.Packaging_Quantity__c === 9, "total 9");
+  ok(/Navy Gildan 5000 Tee: M 5/.test(saved.Quantity_Size_Counted__c) && /Ivory Comfort Colors 3023CL: XL 4/.test(saved.Quantity_Size_Counted__c), "both garments written: " + saved.Quantity_Size_Counted__c);
+  const l1 = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders[0];
+  ok(l1.lines[ivory].sizes[0].boxed === 4, "Ivory XL boxed-so-far = 4");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
