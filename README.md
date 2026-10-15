@@ -33,6 +33,20 @@ Pages project, its own Salesforce connection and its own PIN list.
   in one all-or-nothing request (`/composite/sobjects`, allOrNone), so it's every copy or none.
   A timeout is shown as "not sure" and can't be re-run straight away.
   The box fields are defined once in `_boxes.js` and used by every way of creating a box.
+- **Past Orders** (tab next to In Production): screen-print orders with boxes logged in the last
+  30 days, newest first, read fresh from Salesforce. Each box shows Garment Type, Packaging Type,
+  Quantity + Size Counted, who saved it and when.
+- **7-day review window:** a box can be edited or deleted until exactly 7 days after Salesforce created it
+  (`Order_Packaging__c.CreatedDate`). After that it's read-only and marked LOCKED. The server re-reads the
+  box and checks the deadline on its own clock on every Edit and Delete, so a wrong tablet clock or a
+  hidden button can't get round it.
+- **Edit Box:** changes the same record (PATCH; same ID and CreatedDate): Garment Type word (the box
+  number stays), Packaging Type and size counts; the total is re-added from the sizes. It's sent "only if
+  nobody changed this box since it was read", so two edits can't silently overwrite each other.
+- **Delete Box:** asks first, then deletes that one record (REST DELETE, the same way the dashboard's undo
+  does; it goes to Salesforce's Recycle Bin). Checked 10-15: nothing in Salesforce looks up to Order
+  Packaging, and it has no flows, triggers, validation rules or Rollup Helper rollups. If the order was
+  already finished, its Packaging Count is set to the new number of boxes.
 - **Stays on the board until counted:** once an order has been on the board, it stays
   there even if the print crew moves it to Post-Production early. It's marked
   "MOVED ON · FINISH COUNT" and listed first, until a catcher taps **FINISH CATCHING**.
@@ -86,6 +100,9 @@ functions/api/                  the server (Cloudflare Pages Functions)
   misprints.js                  POST record a misprint
   duplicate-box.js              POST Duplicate Box (1-100 copies, all or nothing)
   _boxes.js                     the one definition of a box record's fields + box numbering
+  past-orders.js                GET  Past Orders (last 30 days)
+  box-edit.js                   POST Edit Box (7-day window)
+  box-delete.js                 POST Delete Box (7-day window)
   finish.js                     POST finish catching (box count -> Packaging_Count__c)
   mockup.js                     GET  one order's mockup picture
 tools/test.mjs                  offline tests against a pretend Salesforce
@@ -122,7 +139,7 @@ but without those two protections.
      Read on the fields the list uses: `GOA_Order_Number__c`, `Order_Substatus__c`,
      `Printer__c`, `Print_Date__c`, `Specifications_for_Printing__c`, `Artwork_URL__c`.
    - Order Product (OrderItem): Read on `Size__c`, `Color__c`, Quantity, and the Product name.
-   - Order Packaging (`Order_Packaging__c`): Read + Create, with Edit on Name,
+   - Order Packaging (`Order_Packaging__c`): Read + Create + Edit + Delete, with Edit on Name,
      `Order__c`, `Packaging_Type__c`, `Packaging_Quantity__c` and `Quantity_Size_Counted__c`.
    - Mockups come from `Order.Artwork_URL__c`, a public file link, so no file access is needed.
 

@@ -10,7 +10,7 @@
  *   Packaging_Quantity__c     the box's total garments (number)
  *   Quantity_Size_Counted__c  "Quantity + Size Counted", e.g. "S 8 · M 15 = 23" (blank if unknown)
  */
-import { SIZE_FIELD } from "./_sizes.js";
+import { SIZE_FIELD, buildBreakdown } from "./_sizes.js";
 
 export function boxFields({ orderId, name, type, qty, breakdown }) {
   return {
@@ -39,4 +39,44 @@ export function nextNames(existingBoxes, word, count) {
     if (m) top = Math.max(top, m[1] ? Number(m[1]) : 1);
   }
   return Array.from({ length: count }, (_, i) => `${word} ${top + i + 1}`);
+}
+
+
+/** Shape check before anything is read: whole numbers only. Returns an error message or "". */
+export function countsShapeError(counts) {
+  if (!Array.isArray(counts)) return "Count at least one size.";
+  if (counts.length > 80) return "Too many sizes in one box. Split it into two boxes.";
+  for (const c of counts) {
+    if (!c || !Number.isInteger(c.line) || typeof c.size !== "string" || !Number.isInteger(c.qty) || c.qty < 0 || c.qty > 9999) {
+      return "A size count isn't a whole number. Check the counts and try again.";
+    }
+  }
+  return "";
+}
+
+/**
+ * Size counts checked against the order's own garments and sizes.
+ * Returns { clean, qty, breakdown } or { error, message }. Used by Log Box,
+ * Save Box & New and Edit Box, so they all accept exactly the same counts.
+ */
+export function checkCounts(order, counts) {
+  const seen = new Set();
+  const clean = [];
+  for (const c of counts) {
+    const line = order.lines[c.line];
+    if (!line || !line.sizes.some((s) => s.size === c.size)) {
+      return { error: "bad_size", message: `"${String(c.size).slice(0, 12)}" isn't a size on this order. Refresh and try again.` };
+    }
+    const k = c.line + "|" + c.size;
+    if (seen.has(k)) return { error: "bad_counts", message: "The same size was sent twice. Try again." };
+    seen.add(k);
+    if (c.qty) clean.push({ line: c.line, size: c.size, qty: c.qty });
+  }
+  const qty = clean.reduce((a, c) => a + c.qty, 0);
+  if (qty < 1 || qty > 9999) return { error: "bad_qty", message: "A box needs between 1 and 9999 garments." };
+  try {
+    return { clean, qty, breakdown: buildBreakdown(order.lines, clean).text };
+  } catch (e) {
+    return { error: "too_long", message: e.message };
+  }
 }

@@ -23,6 +23,9 @@ const mockup = await mod("mockup");
 const finish = await mod("finish");
 const sizes = await mod("_sizes");
 const dup = await mod("duplicate-box");
+const past = await mod("past-orders");
+const bedit = await mod("box-edit");
+const bdel = await mod("box-delete");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -85,11 +88,18 @@ globalThis.fetch = async (url, init = {}) => {
       if (behave.queryFail) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column" }]);
       const idm = q.match(/AND Id = '([^']+)'/);
       const carry = /Packaging_Count__c = null/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : "";
-      let recs = db.orders.filter((o) => o._inProd || (carry.includes(o.Id) && o.Packaging_Count__c == null));
+      const review = !/Order_Substatus__c = 'Production'/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : null;
+      let recs = review !== null ? db.orders.filter((o) => review.includes(o.Id))
+        : db.orders.filter((o) => o._inProd || (carry.includes(o.Id) && o.Packaging_Count__c == null));
       if (idm) recs = recs.filter((o) => o.Id === idm[1]);
       return res(200, { done: true, records: recs.map((o) => { const { _inProd, ...r } = o; return Object.assign({ Order_Substatus__c: _inProd ? "Production" : "Post-Production", Packaging_Count__c: null }, r); }) });
     }
     if (/FROM OrderItem/.test(q)) return res(200, { done: true, records: db.items.filter((i) => q.includes(i.OrderId)) });
+    if (/FROM Order_Packaging__c WHERE CreatedDate = LAST_N_DAYS:(\d+)/.test(q)) {
+      const days = Number(q.match(/LAST_N_DAYS:(\d+)/)[1]);
+      const recs = db.boxes.filter((b) => Date.parse(b.CreatedDate) > Date.now() - days * 86400000).sort((a, b) => b.CreatedDate.localeCompare(a.CreatedDate));
+      return res(200, { done: true, records: recs.map((b) => ({ Order__c: b.Order__c, CreatedDate: b.CreatedDate })) });
+    }
     if (/FROM Order_Packaging__c/.test(q)) return res(200, { done: true, records: db.boxes.filter((b) => q.includes(b.Order__c)) });
     if (/FROM ContentDocumentLink/.test(q)) {
       if (!behave.files) return res(200, { done: true, records: [] });
@@ -130,6 +140,18 @@ globalThis.fetch = async (url, init = {}) => {
       db.boxes.push(Object.assign({ Id: id, CreatedDate: new Date().toISOString(), CreatedBy: { Name: "Catcher App" } }, fields));
       return { id, success: true, errors: [] };
     }));
+  }
+  const pm = u.pathname.match(/\/sobjects\/Order_Packaging__c\/(\w+)$/);
+  if (pm && (method === "PATCH" || method === "DELETE")) {
+    const i = db.boxes.findIndex((x) => x.Id === pm[1]);
+    if (i < 0) return res(404, [{ errorCode: "ENTITY_IS_DELETED", message: "entity is deleted" }]);
+    if (behave.boxLocked) return res(400, [{ errorCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "Box is locked" }]);
+    if (method === "DELETE") { db.boxes.splice(i, 1); return new Response(null, { status: 204 }); }
+    const ius = (init.headers || {})["If-Unmodified-Since"];
+    const lm = db.boxes[i].LastModifiedDate || db.boxes[i].CreatedDate;
+    if (ius && Math.floor(Date.parse(lm) / 1000) > Math.floor(Date.parse(ius) / 1000)) return new Response(null, { status: 412 });
+    Object.assign(db.boxes[i], JSON.parse(init.body), { LastModifiedDate: new Date(Date.now() + 1000).toISOString() });
+    return new Response(null, { status: 204 });
   }
   const om = u.pathname.match(/\/sobjects\/Order\/(\w+)$/);
   if (om && method === "PATCH") {
@@ -536,6 +558,90 @@ await test("Duplicate Box: exact copies, own records, original untouched", async
   r = await dupReq(2, "req-dup00006", oldBox.Id); d = await r.json();
   const last2 = db.boxes.slice(-2);
   ok(r.status === 201 && last2.every((b) => b.Packaging_Quantity__c === 30 && !("Quantity_Size_Counted__c" in b)), "old box without sizes -> copies keep its total, no made-up sizes");
+});
+
+await test("Past Orders + 7-day review window: Edit Box and Delete Box", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const O = "801000000000001AAA", DAY = 86400000, ago = (ms) => new Date(Date.now() - ms).toISOString();
+  const mk = (id, name, createdAgo, extra = {}) => Object.assign({ Id: id, Order__c: O, Name: name, Packaging_Type__c: "Standard Culture Box", Packaging_Quantity__c: 23,
+    Quantity_Size_Counted__c: "S 8 · M 15 = 23", CreatedDate: ago(createdAgo), LastModifiedDate: ago(createdAgo), CreatedBy: { Name: "Catcher App" } }, extra);
+  db.boxes = [mk("a0X000000000010AAA", "Tees 1", 2 * DAY), mk("a0X000000000011AAA", "Tees 2", 8 * DAY), mk("a0X000000000012AAA", "Tees 3", 7 * DAY - 400)];
+  db.orders[0]._inProd = false; db.orders[0].Packaging_Count__c = 3;          // finished, moved on: off the board
+  const P = await (await past.onRequestGet({ request: req("GET", "/api/past-orders", null, cookie), env })).json();
+  const po = P.orders.find((o) => o.id === O);
+  ok(po && po.boxes.length === 3, "a finished order with boxes shows in Past Orders, with all its boxes from Salesforce");
+  const byName = Object.fromEntries(po.boxes.map((b) => [b.name, b]));
+  ok(byName["Tees 1"].editable === true && byName["Tees 2"].editable === false, "2-day-old box editable; 8-day-old box read-only");
+  ok(Date.parse(byName["Tees 1"].editableUntil) === Date.parse(db.boxes[0].CreatedDate) + 7 * DAY, "deadline = Salesforce CreatedDate + exactly 7 days");
+  ok(byName["Tees 1"].sizes === "S 8 · M 15 = 23" && byName["Tees 1"].type === "Standard Culture Box", "shows Garment Type, Packaging Type and the size breakdown");
+  ok((await past.onRequestGet({ request: req("GET", "/api/past-orders"), env })).status === 401, "Past Orders needs a sign-in");
+
+  const edit = (boxId, body, id) => bedit.onRequestPost({ request: req("POST", "/api/box-edit", Object.assign({ orderId: O, boxId, type: "Culture Hat Box", word: "Hoodies", requestId: id,
+    counts: [{ line: 0, size: "S", qty: 5 }, { line: 0, size: "L", qty: 7 }] }, body), cookie), env });
+  let r = await edit("a0X000000000010AAA", {}, "req-edit0001"); let d = await r.json();
+  const e1 = db.boxes.find((b) => b.Id === "a0X000000000010AAA");
+  ok(r.status === 200 && d.box.qty === 12, "edit within 7 days -> 200, new total 12");
+  ok(e1.Name === "Hoodies 1" && e1.Packaging_Type__c === "Culture Hat Box" && e1.Packaging_Quantity__c === 12 && e1.Quantity_Size_Counted__c === "S 5 · L 7 = 12",
+    "same record updated: Garment Type keeps its number, new Packaging Type, total and sizes");
+  ok(db.boxes.length === 3 && e1.CreatedDate === ago(2 * DAY).slice(0, 0) + e1.CreatedDate && !("Order__c" in JSON.parse(posts("/sobjects/Order_Packaging__c/a0X000000000010AAA").pop().body)),
+    "no new box; CreatedDate untouched; the box isn't moved to another order");
+  ok(posts("/sobjects/Order_Packaging__c/a0X000000000010AAA")[0].method === "PATCH", "an update (PATCH), not a create");
+
+  r = await edit("a0X000000000011AAA", {}, "req-edit0002"); d = await r.json();
+  ok(r.status === 403 && d.error === "review_expired" && db.boxes[1].Name === "Tees 2", "8-day-old box: edit refused on the server, nothing changed");
+  await new Promise((res2) => setTimeout(res2, 500));                        // Tees 3 crosses the 7-day line while 'open'
+  r = await edit("a0X000000000012AAA", {}, "req-edit0003"); d = await r.json();
+  ok(r.status === 403 && d.error === "review_expired" && db.boxes[2].Name === "Tees 3", "box that crossed 7 days while open: refused at submit");
+
+  r = await edit("a0X000000000010AAA", { counts: [{ line: 0, size: "S", qty: 0 }] }, "req-edit0004");
+  ok(r.status === 400, "edit to an empty box refused");
+  r = await edit("a0X000000000010AAA", { counts: [{ line: 0, size: "5XL", qty: 3 }] }, "req-edit0005");
+  ok(r.status === 400, "edit with a size not on the order refused");
+  r = await edit("a0X000000000010AAA", { type: "Old Box" }, "req-edit0006");
+  ok(r.status === 400, "edit to an inactive Packaging Type refused");
+
+  behave.boxLocked = true;
+  r = await edit("a0X000000000010AAA", {}, "req-edit0008"); d = await r.json();
+  ok(r.status === 422 && /Box is locked/.test(d.message), "Salesforce refuses the edit -> its reason is shown");
+  behave.boxLocked = false;
+
+  const del = (boxId, id) => bdel.onRequestPost({ request: req("POST", "/api/box-delete", { orderId: O, boxId, requestId: id }, cookie), env });
+  r = await del("a0X000000000011AAA", "req-del00001"); d = await r.json();
+  ok(r.status === 403 && d.error === "review_expired" && db.boxes.length === 3, "8-day-old box: delete refused on the server, still there");
+  r = await del("a0X000000000010AAA", "req-del00002"); d = await r.json();
+  ok(r.status === 200 && db.boxes.length === 2 && !db.boxes.some((b) => b.Id === "a0X000000000010AAA"), "delete within 7 days -> exactly that record deleted");
+  ok(posts("/sobjects/Order_Packaging__c/a0X000000000010AAA").pop().method === "DELETE", "deleted with a REST DELETE (Salesforce Recycle Bin)");
+  ok(db.orders[0].Packaging_Count__c === 2 && /Packaging Count/.test(d.countNote), "finished order's Packaging Count follows: 3 -> 2");
+  r = await del("a0X000000000010AAA", "req-del00002");
+  ok(r.status === 200 && db.boxes.length === 2, "double tap on delete: same answer, nothing else deleted");
+  r = await del("a0X000000000010AAA", "req-del00003");
+  ok(r.status === 404, "deleting a box that's already gone -> 'isn't there any more', nothing else touched");
+  behave.boxLocked = true;
+  db.boxes.push(mk("a0X000000000013AAA", "Tees 4", 1000));
+  r = await del("a0X000000000013AAA", "req-del00004"); d = await r.json();
+  ok(r.status === 422 && db.boxes.some((b) => b.Id === "a0X000000000013AAA") && /still there/.test(d.message), "Salesforce refuses the delete -> box stays, reason shown");
+  behave.boxLocked = false;
+
+  // a box on another order can't be reached through this order
+  r = await bdel.onRequestPost({ request: req("POST", "/api/box-delete", { orderId: "801000000000002AAA", boxId: "a0X000000000013AAA", requestId: "req-del00005" }, cookie), env });
+  ok(r.status === 404 && db.boxes.some((b) => b.Id === "a0X000000000013AAA"), "box id + wrong order -> refused");
+});
+
+await test("Edit Box: someone else changed the box first -> not overwritten", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  db.boxes = [{ Id: "a0X000000000020AAA", Order__c: "801000000000001AAA", Name: "Tees 1", Packaging_Type__c: "Standard Culture Box", Packaging_Quantity__c: 10,
+    CreatedDate: new Date(Date.now() - 3600000).toISOString(), LastModifiedDate: new Date(Date.now() - 3600000).toISOString(), CreatedBy: { Name: "X" } }];
+  // simulate the other person's change landing between the app's read and its write
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).includes("/sobjects/Order_Packaging__c/a0X000000000020AAA") && (init.method || "") === "PATCH") db.boxes[0].LastModifiedDate = new Date(Date.now() + 5000).toISOString();
+    return realFetch(url, init);
+  };
+  const r = await bedit.onRequestPost({ request: req("POST", "/api/box-edit", { orderId: "801000000000001AAA", boxId: "a0X000000000020AAA", type: "Standard Culture Box", word: "Tees",
+    counts: [{ line: 0, size: "S", qty: 4 }], requestId: "req-race0001" }, cookie), env });
+  globalThis.fetch = realFetch;
+  const d = await r.json();
+  ok(r.status === 409 && d.error === "changed" && db.boxes[0].Packaging_Quantity__c === 10, "412 from Salesforce -> 'someone changed this box', nothing overwritten");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

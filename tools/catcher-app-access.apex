@@ -7,7 +7,8 @@
 // What it grants (and nothing else):
 //   Order            Read + View All. Edit ONLY TotalQtyMisprints__c, Misprint_Details__c and Packaging_Count__c.
 //   Order Product    Read Size__c and Color__c (Order Products follow the Order's access).
-//   Order Packaging  Read + Create + View All. No edit or delete of existing boxes.
+//   Order Packaging  Read + Create + Edit + Delete + View All (Edit Box / Delete Box; the app allows
+//                    changes only within 7 days of a box being created).
 //   Account, Product, Price Book, the Printer's object   Read only.
 String USERNAME_PREFIX = 'catcher.app@';
 String PS_NAME = 'Catcher_App_Access';
@@ -33,10 +34,12 @@ if (found.isEmpty()) {
 }
 
 // ---- objects ----
+// Delete is allowed on boxes ONLY (Delete Box, 7-day review window, enforced by the app).
+Set<String> CAN_DELETE = new Set<String>{ 'Order_Packaging__c' };
 // name => {read, create, edit, viewAll}
 Map<String, List<Boolean>> objs = new Map<String, List<Boolean>>{
     'Order'              => new List<Boolean>{ true, false, true,  true },
-    'Order_Packaging__c' => new List<Boolean>{ true, true,  false, true },
+    'Order_Packaging__c' => new List<Boolean>{ true, true,  true,  true },   // edit: Edit Box (7-day review window, enforced by the app)
     'Account'            => new List<Boolean>{ true, false, false, true },
     'Product2'           => new List<Boolean>{ true, false, false, true },
     'Pricebook2'         => new List<Boolean>{ true, false, false, false }   // Order Products are only visible with Price Book read
@@ -54,7 +57,7 @@ for (String n : objs.keySet()) {
     List<Boolean> f = objs.get(n);
     ObjectPermissions op = haveObj.containsKey(n) ? haveObj.get(n) : new ObjectPermissions(ParentId = ps.Id, SobjectType = n);
     op.PermissionsRead = f[0]; op.PermissionsCreate = f[1]; op.PermissionsEdit = f[2];
-    op.PermissionsViewAllRecords = f[3]; op.PermissionsDelete = false; op.PermissionsModifyAllRecords = false;
+    op.PermissionsViewAllRecords = f[3]; op.PermissionsDelete = CAN_DELETE.contains(n); op.PermissionsModifyAllRecords = false;
     Database.UpsertResult r = Database.upsert(op, false);
     if (!r.isSuccess() && op.PermissionsViewAllRecords) {
         // This license won't allow "View All" on this object: keep the rest, without it.

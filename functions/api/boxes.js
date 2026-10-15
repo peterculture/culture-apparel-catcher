@@ -17,8 +17,7 @@
 import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
-import { buildBreakdown } from "./_sizes.js";
-import { boxFields } from "./_boxes.js";
+import { boxFields, countsShapeError, checkCounts } from "./_boxes.js";
 
 export async function onRequestPost({ request, env }) {
   const auth = await requireUser(request, env);
@@ -36,12 +35,8 @@ export async function onRequestPost({ request, env }) {
 
     if (!SF_ID.test(orderId)) return json({ error: "bad_order_id", message: "That order is not valid. Refresh the list." }, 400);
     if (counts) {
-      if (counts.length > 80) return json({ error: "bad_counts", message: "Too many sizes in one box. Split it into two boxes." }, 400);
-      for (const c of counts) {
-        if (!c || !Number.isInteger(c.line) || typeof c.size !== "string" || !Number.isInteger(c.qty) || c.qty < 0 || c.qty > 9999) {
-          return json({ error: "bad_counts", message: "A size count isn't a whole number. Check the counts and try again." }, 400);
-        }
-      }
+      const bad = countsShapeError(counts);
+      if (bad) return json({ error: "bad_counts", message: bad }, 400);
       qty = counts.reduce((a, c) => a + c.qty, 0);
     }
     if (!Number.isInteger(qty) || qty < 1 || qty > 9999) return json({ error: "bad_qty", message: "Enter how many garments are in the box (1 to 9999)." }, 400);
@@ -61,20 +56,9 @@ export async function onRequestPost({ request, env }) {
     let breakdown = "";
     let clean = [];
     if (counts) {
-      const seen = new Set();
-      for (const c of counts) {
-        const line = order.lines[c.line];
-        if (!line || !line.sizes.some((s) => s.size === c.size)) {
-          return json({ error: "bad_size", message: `"${String(c.size).slice(0, 12)}" isn't a size on this order. Refresh and try again.` }, 400);
-        }
-        const k = c.line + "|" + c.size;
-        if (seen.has(k)) return json({ error: "bad_counts", message: "The same size was sent twice. Try again." }, 400);
-        seen.add(k);
-        if (c.qty) clean.push({ line: c.line, size: c.size, qty: c.qty });
-      }
-      try { breakdown = buildBreakdown(order.lines, clean).text; } catch (e) {
-        return json({ error: "too_long", message: e.message }, 400);
-      }
+      const checked = checkCounts(order, counts);
+      if (checked.error) return json({ error: checked.error, message: checked.message }, 400);
+      ({ clean, breakdown } = checked);
     }
 
     const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/Order_Packaging__c`, {

@@ -84,14 +84,58 @@ export async function loadOrders(env, { orderId } = {}) {
   const orders = await runQuery(env,
     `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${where} ORDER BY Print_Date__c ASC, OrderNumber ASC LIMIT 200`);
   if (!orders.length) { if (!orderId) await writeSeen(env, seen, []); return []; }
+  const result = await buildOrders(env, orders);
+  if (!orderId) await writeSeen(env, seen, result);
+  // Orders the crew already moved on come first: they're the ones waiting on the catcher.
+  return result.sort((a, b) => Number(a.inProduction) - Number(b.inProduction));
+}
 
+/* ---------------- the 7-day review window (Anthony, 2026-10-15) ----------------
+ * A box can be edited or deleted for 7 days after Salesforce created it
+ * (Order_Packaging__c.CreatedDate -- set by Salesforce itself, can't be changed by
+ * the app or the tablet). The deadline is checked on THIS server's clock, never
+ * the tablet's, and checked again on a fresh read every time a change is sent. */
+export const REVIEW_MS = 7 * 24 * 3600 * 1000;
+export function reviewDeadline(createdIso) {
+  const t = Date.parse(createdIso);
+  return Number.isFinite(t) ? t + REVIEW_MS : 0;
+}
+export function canChange(box, now = Date.now()) {
+  const until = reviewDeadline(box.at);
+  return until > 0 && now < until;
+}
+
+/**
+ * Orders by Id for the Past Orders view and for checking an edit or delete.
+ * Only screen-print orders (the same printers as the board); no status rule,
+ * because finished orders are exactly what Past Orders is for.
+ */
+export async function loadReviewOrders(env, orderIds) {
+  const ids = orderIds.filter((id) => SF_ID.test(id)).slice(0, 100);
+  if (!ids.length) return [];
+  const orders = await runQuery(env,
+    `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE Id IN (${ids.map(soqlQuote).join(",")})` +
+    ` AND Printer__r.Name IN (${printerNames(env).map(soqlQuote).join(",")}) LIMIT 100`);
+  return orders.length ? buildOrders(env, orders) : [];
+}
+
+/** One order for an edit/delete check, read fresh, or an error a catcher can understand. */
+export async function loadReviewOrder(env, orderId) {
+  const [order] = await loadReviewOrders(env, [orderId]);
+  if (!order) throw new SfError("order_not_found", 404, "That order can't be found any more. Refresh Past Orders.");
+  return order;
+}
+
+/** Order rows -> the shape the tablet uses: garment lines by size, and saved boxes. */
+async function buildOrders(env, orders) {
   const ids = orders.map((o) => soqlQuote(o.Id)).join(",");
   const [items, boxes] = await Promise.all([
     runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name FROM OrderItem WHERE OrderId IN (${ids})`),
-    runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, CreatedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
+    runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, CreatedDate, LastModifiedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
   ]);
 
-  const result = orders.map((o) => {
+  const now = Date.now();
+  return orders.map((o) => {
     // Garment lines: one per product + colour, sizes sorted S..XL. Rows with no
     // size are not garments (setup fees, screens) and are left out.
     const groups = new Map();
@@ -116,6 +160,10 @@ export async function loadOrders(env, { orderId } = {}) {
       id: b.Id, name: b.Name, type: b.Packaging_Type__c || "", qty: Number(b.Packaging_Quantity__c) || 0,
       sizes: b[SIZE_FIELD] || "", counts: parseBreakdown(lines, b[SIZE_FIELD]),
       at: b.CreatedDate, by: (b.CreatedBy && b.CreatedBy.Name) || "",
+      lastModified: b.LastModifiedDate || b.CreatedDate,
+      // 7-day review window, worked out on the server's clock from Salesforce's own CreatedDate.
+      editableUntil: reviewDeadline(b.CreatedDate) ? new Date(reviewDeadline(b.CreatedDate)).toISOString() : null,
+      editable: canChange({ at: b.CreatedDate }, now),
     }));
     // How many of each size are already in a box (only boxes with a size breakdown count).
     for (const b of orderBoxes) for (const c of b.counts) {
@@ -144,9 +192,6 @@ export async function loadOrders(env, { orderId } = {}) {
       boxes: orderBoxes,
     };
   });
-  if (!orderId) await writeSeen(env, seen, result);
-  // Orders the crew already moved on come first: they're the ones waiting on the catcher.
-  return result.sort((a, b) => Number(a.inProduction) - Number(b.inProduction));
 }
 
 /** One order, or an error a catcher can understand. Used before every save. */

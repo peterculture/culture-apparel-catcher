@@ -26,7 +26,10 @@
     saving: false,
     pending: null,         // last save, so "Try again" re-sends the SAME request id
     toast: null,           // { kind: ok|err|unsure, title, body, retry }
-    pin: ""
+    pin: "",
+    mode: "board",         // "board" (In Production) | "past" (Past Orders)
+    past: [], pastLoaded: false, pastError: "", pastSelId: null,
+    del: null              // { boxId, requestId } while the Delete Box dialog is open
   };
 
   var $app = document.getElementById("app");
@@ -81,10 +84,27 @@
     if (/tote|bag/i.test(p)) return "Bags";
     return "Tees";
   }
-  function current() {
-    for (var i = 0; i < state.orders.length; i++) if (state.orders[i].id === state.selId) return state.orders[i];
+  function findIn(list, id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
     return null;
   }
+  /** The order on screen: from the board, or from Past Orders. */
+  function current() {
+    return state.mode === "past" ? findIn(state.past, state.pastSelId) : findIn(state.orders, state.selId);
+  }
+  /* The 7-day review window. The SERVER decides (it re-checks every edit and delete on its own
+     clock); this only hides buttons for boxes that are clearly past it. */
+  var REVIEW_MS = 7 * 24 * 3600 * 1000;
+  function withWindow(b) {
+    if (!b.editableUntil && b.at) { b.editableUntil = new Date(Date.parse(b.at) + REVIEW_MS).toISOString(); b.editable = true; }
+    return b;
+  }
+  function canChangeBox(b) { return !!b.editable && Date.now() < Date.parse(b.editableUntil || 0); }
+  function fmtWhen(iso) {
+    var d = new Date(iso); if (isNaN(d)) return "";
+    return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + ", " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  function garmentWordOf(name) { return String(name || "").replace(/\s+\d+$/, "").trim() || "Box"; }
   var ICON = {
     x: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     back: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg>',
@@ -144,7 +164,7 @@
         state.orders = r.data.orders;
         state.loaded = true;
         state.loadError = "";
-        if (!current()) state.selId = state.orders.length ? state.orders[0].id : null;
+        if (!findIn(state.orders, state.selId)) state.selId = state.orders.length ? state.orders[0].id : null;
         dropOldMocks();
         setConn("live");
       } else {
@@ -155,6 +175,25 @@
       if (!state.sheet) renderMain();
     });
   }
+
+  /** Past Orders: boxed orders from the last 30 days, read fresh from Salesforce. */
+  function loadPast(quiet) {
+    if (!state.user) return Promise.resolve();
+    if (!quiet) setConn("");
+    return api("GET", "/api/past-orders").then(function (r) {
+      if (!state.user) return;
+      if (r.ok && Array.isArray(r.data.orders)) {
+        state.past = r.data.orders; state.pastLoaded = true; state.pastError = "";
+        if (!findIn(state.past, state.pastSelId)) state.pastSelId = state.past.length ? state.past[0].id : null;
+        setConn("live");
+      } else {
+        state.pastError = (r.data && r.data.message) || "Could not load past orders.";
+        setConn("down");
+      }
+      if (!state.sheet && state.mode === "past") renderMain();
+    });
+  }
+  function reloadAll() { loadOrders(true); loadPast(true); }
 
   function loadSetup() {
     return Promise.all([api("GET", "/api/me"), api("GET", "/api/box-types")]).then(function (rs) {
@@ -345,7 +384,34 @@
       '<div class="pin-pad">' + keys + "</div></div></div>";
   }
 
+  function modeTabs() {
+    return '<div class="mode-tabs" role="tablist">' +
+      '<button role="tab" data-act="mode" data-m="board" aria-selected="' + (state.mode === "board") + '">IN PRODUCTION <span>' + state.orders.length + "</span></button>" +
+      '<button role="tab" data-act="mode" data-m="past" aria-selected="' + (state.mode === "past") + '">PAST ORDERS</button></div>';
+  }
+
+  function pastListHtml() {
+    var cards = state.past.map(function (o) {
+      var open = o.boxes.filter(canChangeBox).length;
+      var tag = open ? '<span class="tag edit">' + open + (open === 1 ? " BOX" : " BOXES") + " EDITABLE</span>" : '<span class="tag lock">READ-ONLY · PAST 7 DAYS</span>';
+      return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" aria-pressed="' + (o.id === state.pastSelId) + '">' +
+        '<span class="thumb">' + ICON.box + "</span>" +
+        '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
+        '<span class="card-cust">' + esc(o.customer) + "</span>" +
+        '<span class="card-meta">' + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + (o.lastBoxAt ? " · last box " + esc(fmtDate(o.lastBoxAt)) + " " + esc(fmtTime(o.lastBoxAt)) : "") + "</span>" + tag + "</span></button>";
+    }).join("");
+    var body;
+    if (!state.pastLoaded && state.pastError) body = '<div class="empty"><strong>COULDN\'T LOAD PAST ORDERS</strong>' + esc(state.pastError) + '<br><button class="back" data-act="reload">TRY AGAIN</button></div>';
+    else if (!state.pastLoaded) body = '<div class="empty">Loading past orders…</div>';
+    else if (!state.past.length) body = '<div class="empty"><strong>NO BOXES IN THE LAST 30 DAYS</strong>Screen-print orders show here once boxes are logged on them.</div>';
+    else body = (state.pastError ? '<div class="empty" style="margin-bottom:0"><strong>MAY BE OUT OF DATE</strong>' + esc(state.pastError) + "</div>" : "") + '<div class="cards">' + cards + "</div>";
+    return '<section class="list" aria-label="Past orders">' + modeTabs() +
+      '<div class="list-head"><div class="list-title"><h1>PAST ORDERS</h1><span class="list-count">' + state.past.length + "</span></div>" +
+      '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div></div>' + body + "</section>";
+  }
+
   function listHtml() {
+    if (state.mode === "past") return pastListHtml();
     var cards = state.orders.map(function (o) {
       var sel = o.id === state.selId;
       var thumb = o.hasMockup ? '<img class="thumb-img" alt="" data-mock="' + esc(o.id) + ':0"><span class="mock-wait">' + ICON.shirt + "</span>" : ICON.shirt;
@@ -369,7 +435,7 @@
       body = (state.loadError ? '<div class="empty" style="margin-bottom:0"><strong>MAY BE OUT OF DATE</strong>' + esc(state.loadError) + "</div>" : "") +
         '<div class="cards">' + cards + "</div>";
     }
-    return '<section class="list" aria-label="Orders in production">' +
+    return '<section class="list" aria-label="Orders in production">' + modeTabs() +
       '<div class="list-head"><div class="list-title"><h1>IN PRODUCTION</h1><span class="list-count">' + state.orders.length + "</span></div>" +
       '<div class="list-sub"><i></i>SCREEN PRINT ONLY</div></div>' + body + "</section>";
   }
@@ -377,6 +443,7 @@
   function detailHtml() {
     var o = current();
     if (!o) return '<main class="detail"><div class="empty">Pick an order on the left.</div></main>';
+    if (state.mode === "past") return pastDetailHtml(o);
     var boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
     var mock = o.hasMockup
       ? '<button class="mock" data-act="mock" data-id="' + esc(o.id) + '" aria-label="Open the mockup full size"><img class="mock-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + ':0"><span class="mock-wait mock-none">LOADING<br>MOCKUP…</span><span class="badge">' + ICON.expand + '</span><span class="cap">' + ((o.mockupCount || 1) > 1 ? "TAP TO SEE ALL " + o.mockupCount : "TAP TO ENLARGE") + '</span></button>'
@@ -387,10 +454,7 @@
           return '<div class="size"><div class="s">' + esc(s.size) + '</div><div class="q">' + s.qty + "</div></div>";
         }).join("") + "</div></div>";
     }).join("");
-    var log = o.boxes.map(function (b, i) {
-      return '<div class="log-row"><span class="log-icon">' + (i + 1) + '</span><span class="log-text">“' + esc(b.name) + "” · " + esc(b.type) + " · " + b.qty + " garments" +
-        (b.sizes ? '<span class="log-sizes">' + esc(b.sizes) + "</span>" : "") + '</span><button class="log-dup" data-act="open-dup" data-id="' + esc(b.id) + '">DUPLICATE BOX</button><span class="log-who">' + esc(b.by) + (b.at ? " · " + fmtTime(b.at) : "") + "</span></div>";
-    }).join("");
+    var log = boxRowsHtml(o, true);
     var misLog = o.misprintNotes ? '<div class="sec-label" style="margin-top:.6rem">MISPRINT NOTES IN SALESFORCE</div><div class="notes">' + esc(o.misprintNotes.split(" | ").join("\n")) + "</div>" : "";
     var banner = o.inProduction ? "" : '<div class="moved-banner">' + ICON.warn +
       "<div><b>MOVED TO " + esc(String(o.status || "Post-Production").toUpperCase()) + "</b>The print crew moved this order on. Finish logging its boxes, then tap FINISH CATCHING. It stays on your board until you do.</div></div>";
@@ -409,6 +473,46 @@
       '<div class="log"><div class="sec-label">BOXES ON THIS ORDER</div>' +
       (log || '<div class="empty" style="margin:0">No boxes logged yet.</div>') + misLog + "</div>" +
       "</main>";
+  }
+
+  /** Saved boxes, with Duplicate (board only), Edit and Delete -- or a lock once the 7 days are up. */
+  function boxRowsHtml(o, onBoard) {
+    return o.boxes.map(function (b, i) {
+      withWindow(b);
+      var open = canChangeBox(b);
+      var btns = (onBoard ? '<button class="log-btn" data-act="open-dup" data-id="' + esc(b.id) + '">DUPLICATE BOX</button>' : "") +
+        (open ? '<button class="log-btn" data-act="open-edit" data-id="' + esc(b.id) + '">EDIT BOX</button>' +
+                '<button class="log-btn del" data-act="open-del" data-id="' + esc(b.id) + '">DELETE BOX</button>'
+              : '<span class="log-lock">LOCKED · 7-DAY REVIEW ENDED</span>');
+      return '<div class="log-row box-row"><span class="log-icon">' + (i + 1) + "</span>" +
+        '<span class="log-text"><span class="log-main">' +
+        '<span class="kv"><span class="k">GARMENT TYPE</span>' + esc(b.name) + "</span>" +
+        '<span class="kv"><span class="k">PACKAGING TYPE</span>' + esc(b.type || "—") + "</span>" +
+        '<span class="kv"><span class="k">QUANTITY + SIZE COUNTED</span>' + esc(b.sizes || (b.qty + " garments (no size breakdown)")) + "</span></span>" +
+        '<span class="log-who">Saved ' + esc(fmtWhen(b.at)) + (b.by ? " by " + esc(b.by) : "") +
+        (open ? " · can be changed until " + esc(fmtWhen(b.editableUntil)) : " · read-only since " + esc(fmtWhen(b.editableUntil))) + "</span></span>" +
+        '<span class="log-btns">' + btns + "</span></div>";
+    }).join("");
+  }
+
+  /** Past Orders: one order's saved boxes, for review. No logging, no finishing. */
+  function pastDetailHtml(o) {
+    var boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
+    var open = o.boxes.filter(function (b) { return canChangeBox(withWindow(b)); }).length;
+    var where = o.inProduction ? "STILL IN PRODUCTION" : String(o.status || "").toUpperCase() || "NOT IN PRODUCTION";
+    return '<main class="detail">' +
+      '<button class="back narrow-only" data-act="back">' + ICON.back + "PAST ORDERS</button>" +
+      '<div class="review-banner"><b>REVIEWING PAST ORDER ' + esc(o.num) + "</b>" +
+      (open ? open + (open === 1 ? " box" : " boxes") + " can still be edited or deleted. Each box can be changed for 7 days after it was saved."
+            : "Every box on this order is past its 7-day review period, so it's read-only.") + "</div>" +
+      '<div class="d-top"><div class="d-id"><h2 class="d-num">' + esc(o.num) + "</h2>" +
+      '<div class="d-cust">' + esc(o.customer) + "</div>" +
+      '<div class="d-meta">Print date ' + esc(fmtDate(o.printDate)) + " · " + esc(where) + (o.finished ? " · Packaging Count " + o.finishedCount : "") + "</div></div></div>" +
+      '<div class="stats"><div class="stat"><div class="l">BOXES</div><div class="v">' + o.boxes.length + "</div></div>" +
+      '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + "</small></div></div>" +
+      '<div class="stat"><div class="l">EDITABLE</div><div class="v">' + open + "</div></div></div>" +
+      '<div class="log"><div class="sec-label">BOXES ON THIS ORDER (FROM SALESFORCE)</div>' +
+      (boxRowsHtml(o, false) || '<div class="empty" style="margin:0">No boxes on this order any more.</div>') + "</div></main>";
   }
 
   function finishBtn(o) {
@@ -469,7 +573,8 @@
   }
 
   function boxSheetHtml(o) {
-    var b = state.box, total = boxTotal(o, b);
+    var b = state.box, total = boxTotal(o, b), ed = b.edit;
+    var orig = ed ? ed.orig : {};
     var boxed = o.boxes.reduce(function (a, x) { return a + x.qty; }, 0);
     var types = state.boxTypes.length ? state.boxTypes.map(function (t) {
       return '<button class="chip" data-act="box-type" data-v="' + esc(t.value) + '" aria-pressed="' + (b.type === t.value) + '">' + esc(t.label) + "</button>";
@@ -477,7 +582,7 @@
     var groups = o.lines.map(function (l, li) {
       var lineCount = 0;
       var cells = l.sizes.map(function (s) {
-        var k = cellKey(li, s.size), v = b.cells[k] || "", q = parseInt(v || "0", 10) || 0, left = sizeLeft(s);
+        var k = cellKey(li, s.size), v = b.cells[k] || "", q = parseInt(v || "0", 10) || 0, left = sizeLeft(s) + (orig[k] || 0);
         lineCount += q;
         return '<button class="cell' + (q ? " has" : "") + (q > left ? " over" : "") + '" data-act="box-cell" data-k="' + esc(k) + '" aria-pressed="' + (b.sel === k) + '" aria-label="' + esc(s.size) + ", " + q + ' counted">' +
           '<span class="s">' + esc(s.size) + '</span><span class="q">' + (v || "0") + '</span><span class="left">' + Math.max(0, left) + " left</span></button>";
@@ -493,25 +598,55 @@
     var selParts = b.sel ? b.sel.split("|") : null;
     var selLine = selParts ? o.lines[Number(selParts[0])] : null;
     var selSize = selLine ? selLine.sizes.filter(function (s) { return s.size === selParts.slice(1).join("|"); })[0] : null;
-    var restN = selSize ? Math.max(0, sizeLeft(selSize)) : 0;
-    var ready = total > 0 && total <= 9999 && !!b.type;
-    var label = state.saving ? "SAVING TO SALESFORCE…" : ready ? "SAVE BOX " + (o.boxes.length + 1) + " · " + total + " GARMENTS" : !b.type ? "PICK A PACKAGING TYPE" : "COUNT AT LEAST ONE SIZE";
-    return '<div class="scrim"><div class="sheet wide" role="dialog" aria-label="Log a box">' +
-      '<div class="sheet-head"><div class="sheet-title"><h2>LOG BOX ' + (o.boxes.length + 1) + " · " + esc(o.num) + "</h2>" +
-      "<p>" + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + " saved · " + boxed + " of " + o.total + " garments boxed</p></div>" +
+    var restN = selSize ? Math.max(0, sizeLeft(selSize) + (orig[b.sel] || 0)) : 0;
+    var ready = total > 0 && total <= 9999 && !!b.type && (!ed || !!b.word);
+    var label = state.saving ? "SAVING TO SALESFORCE…" : !ready ? (!b.type ? "PICK A PACKAGING TYPE" : "COUNT AT LEAST ONE SIZE")
+      : ed ? "SAVE CHANGES · " + total + " GARMENTS" : "SAVE BOX " + (o.boxes.length + 1) + " · " + total + " GARMENTS";
+    var gtName = ed ? b.word + (ed.num ? " " + ed.num : "") : boxName(o, b);
+    var words = [];
+    if (ed) {
+      o.lines.forEach(function (l) { var w = shortFor(l.product); if (words.indexOf(w) < 0) words.push(w); });
+      if (words.indexOf(ed.word0) < 0) words.unshift(ed.word0);
+    }
+    var wordChips = ed ? '<div><div class="sec-label">GARMENT TYPE <span style="color:var(--text-ghost)">· BOX NUMBER ' + esc(ed.num || "—") + ' STAYS THE SAME</span></div><div class="chips">' +
+      words.map(function (w) { return '<button class="chip" data-act="box-word" data-v="' + esc(w) + '" aria-pressed="' + (b.word === w) + '">' + esc(w) + "</button>"; }).join("") + "</div></div>" : "";
+    return '<div class="scrim"><div class="sheet wide" role="dialog" aria-label="' + (ed ? "Edit a box" : "Log a box") + '">' +
+      '<div class="sheet-head"><div class="sheet-title"><h2>' + (ed ? "EDIT BOX “" + esc(ed.name0) + "” · " + esc(o.num) : "LOG BOX " + (o.boxes.length + 1) + " · " + esc(o.num)) + "</h2>" +
+      "<p>" + (ed ? "Saved " + esc(fmtWhen(ed.at)) + " · can be changed until " + esc(fmtWhen(ed.until)) + ". Saving changes this box; it doesn't make a new one."
+                  : o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + " saved · " + boxed + " of " + o.total + " garments boxed") + "</p></div>" +
       '<button class="x" data-act="close" aria-label="Close">' + ICON.x + "</button></div>" +
-      '<div><div class="sec-label">1 · PACKAGING TYPE</div><div class="chips">' + types + "</div></div>" +
-      '<div class="row2"><div class="grow"><div class="sec-label">2 · QUANTITY + SIZE COUNTED <span style="color:var(--text-ghost)">· TAP A SIZE, TYPE THE COUNT</span></div>' + groups + "</div>" +
+      (ed && !ed.hadSizes ? '<div class="fin-warn">This box was saved without sizes (' + ed.qty0 + " garments). Count its sizes below to save a change.</div>" : "") +
+      wordChips +
+      '<div><div class="sec-label">' + (ed ? "" : "1 · ") + 'PACKAGING TYPE</div><div class="chips">' + types + "</div></div>" +
+      '<div class="row2"><div class="grow"><div class="sec-label">' + (ed ? "" : "2 · ") + 'QUANTITY + SIZE COUNTED <span style="color:var(--text-ghost)">· TAP A SIZE, TYPE THE COUNT</span></div>' + groups + "</div>" +
       '<div class="pad-wrap"><div class="pad-for">' + (selSize ? "COUNT FOR <b>" + esc(selSize.size) + "</b>" + (o.lines.length > 1 ? " · " + esc(selLine.color || selLine.product) : "") : "TAP A SIZE") + "</div>" +
       '<div class="pad">' + keys + "</div>" +
       '<div class="quick"><button data-act="box-rest"' + (selSize && restN ? "" : " disabled") + ">Rest of " + (selSize ? esc(selSize.size) : "size") + " (" + restN + ")</button>" +
       '<button data-act="box-next"' + (selSize ? "" : " disabled") + ">Next size →</button></div></div></div>" +
       '<div class="total-bar' + (total ? " on" : "") + '"><div><div class="l">TOTAL IN THIS BOX</div><div class="v" aria-live="polite">' + total + "</div></div>" +
-      '<div class="gt">Garment Type<b>' + esc(boxName(o, b)) + "</b></div></div>" +
+      '<div class="gt">Garment Type<b>' + esc(gtName) + "</b></div></div>" +
       (total > 9999 ? '<div class="fin-warn">One box can hold at most 9999 garments.</div>' : "") +
-      '<div class="save-row"><button class="save' + (state.saving ? " busy" : "") + '" data-act="save-box"' + (ready && !state.saving ? "" : " disabled") + ">" +
+      '<div class="save-row"><button class="save' + (state.saving ? " busy" : "") + '" data-act="' + (ed ? "save-edit" : "save-box") + '"' + (ready && !state.saving ? "" : " disabled") + ">" +
       (state.saving ? '<span class="spin"></span>' : "") + label + "</button>" +
-      '<button class="save alt" data-act="save-box-new"' + (ready && !state.saving ? "" : " disabled") + ">SAVE BOX &amp; NEW</button></div></div></div>";
+      (ed ? '<button class="save alt" data-act="close"' + (state.saving ? " disabled" : "") + ">CANCEL</button>"
+          : '<button class="save alt" data-act="save-box-new"' + (ready && !state.saving ? "" : " disabled") + ">SAVE BOX &amp; NEW</button>") + "</div></div></div>";
+  }
+
+  function delSheetHtml(o) {
+    var d = state.del, b = o.boxes.filter(function (x) { return x.id === d.boxId; })[0];
+    if (!b) return "";
+    return '<div class="scrim"><div class="sheet" role="alertdialog" aria-label="Delete box">' +
+      '<div class="sheet-head"><div class="sheet-title"><h2 class="danger">DELETE BOX “' + esc(b.name) + "” · " + esc(o.num) + "?</h2>" +
+      "<p>Saved " + esc(fmtWhen(b.at)) + (b.by ? " by " + esc(b.by) : "") + "</p></div>" +
+      '<button class="x" data-act="close" aria-label="Close"' + (state.saving ? " disabled" : "") + ">" + ICON.x + "</button></div>" +
+      '<div class="dup-src"><div><span class="l">GARMENT TYPE</span>' + esc(b.name) + "</div>" +
+      '<div><span class="l">PACKAGING TYPE</span>' + esc(b.type || "—") + "</div>" +
+      '<div><span class="l">QUANTITY + SIZE COUNTED</span>' + esc(b.sizes || b.qty + " garments") + "</div></div>" +
+      '<div class="fin-warn">Deleting removes this box\'s saved record from Salesforce. It will no longer count toward this order\'s boxes' +
+      (o.finished ? ", and the order's Packaging Count will drop to " + (o.boxes.length - 1) : "") + ". Only do this if the box was logged by mistake.</div>" +
+      '<div class="save-row"><button class="save alt" data-act="close"' + (state.saving ? " disabled" : "") + ">KEEP THE BOX</button>" +
+      '<button class="save danger' + (state.saving ? " busy" : "") + '" data-act="del-confirm"' + (state.saving ? " disabled" : "") + ">" +
+      (state.saving ? '<span class="spin"></span>DELETING…' : "YES, DELETE THIS BOX") + "</button></div></div></div>";
   }
 
   var MAX_DUP = 100;
@@ -597,6 +732,7 @@
     else if (state.sheet === "mis") $overlay.innerHTML = misSheetHtml(o);
     else if (state.sheet === "fin") $overlay.innerHTML = finSheetHtml(o);
     else if (state.sheet === "dup") $overlay.innerHTML = dupSheetHtml(o);
+    else if (state.sheet === "del") $overlay.innerHTML = delSheetHtml(o);
     else if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); fillMockups($overlay); setupViewer(); }
     if (active) {
       var el = document.getElementById("mis-note");
@@ -625,7 +761,7 @@
     opts = opts || {};
     state.saving = true; state.pending = { kind: kind, payload: payload, opts: opts };
     state.toast = null; renderToast(); renderOverlay();
-    var path = kind === "box" ? "/api/boxes" : kind === "fin" ? "/api/finish" : kind === "dup" ? "/api/duplicate-box" : "/api/misprints";
+    var path = { box: "/api/boxes", fin: "/api/finish", dup: "/api/duplicate-box", edit: "/api/box-edit", del: "/api/box-delete" }[kind] || "/api/misprints";
     api("POST", path, payload).then(function (r) {
       state.saving = false;
       if (r.ok && kind === "dup" && r.data && r.data.error === "partial") {
@@ -641,7 +777,13 @@
       if (r.ok) {
         state.pending = null;
         var o = current();
-        if (kind === "dup" && o && r.data.boxes) {
+        if (kind === "edit" && o && r.data.box) {
+          for (var ei = 0; ei < o.boxes.length; ei++) if (o.boxes[ei].id === r.data.box.id) o.boxes[ei] = r.data.box;
+          showToast({ kind: "ok", title: "BOX UPDATED", body: "“" + r.data.box.name + "” on " + o.num + " is now " + r.data.box.type + " · " + (r.data.box.sizes || r.data.box.qty + " garments") + ". Confirmed by Salesforce (same box, same record)." });
+        } else if (kind === "del" && o && r.data.deleted) {
+          o.boxes = o.boxes.filter(function (x) { return x.id !== r.data.deleted.id; });
+          showToast({ kind: "ok", title: "BOX DELETED", body: "“" + r.data.deleted.name + "” is deleted from " + o.num + " in Salesforce. " + (r.data.countNote || "") });
+        } else if (kind === "dup" && o && r.data.boxes) {
           Array.prototype.push.apply(o.boxes, r.data.boxes);
           var bx = r.data.boxes, first = bx[0], last = bx[bx.length - 1];
           showToast({ kind: "ok", title: bx.length + (bx.length === 1 ? " BOX CREATED" : " BOXES CREATED"),
@@ -661,23 +803,27 @@
           var mp = r.data.misprint;
           showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + ". The print shop has been notified." });
         }
-        state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null;
+        state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null; state.del = null;
         if (kind === "box" && opts.andNew && o) {
           // SAVE BOX & NEW: only now that Salesforce has confirmed, open a fresh, blank box.
           state.box = newBox(o); state.sheet = "box";
         }
         renderOverlay(); renderMain(); renderToast();
-        loadOrders(true);                      // pull the real numbers back from Salesforce
+        reloadAll();                           // pull the real records back from Salesforce, on both views
       } else if (r.status === 0 || (r.data && r.data.error === "unconfirmed") || (r.data && r.data.error === "in_progress")) {
-        state.sheet = null; state.dup = null; renderOverlay();
-        showToast({ kind: "unsure", title: "NOT SURE IT SAVED", body: (r.data && r.data.message) || "Check the order before trying again." });
-        loadOrders(true);
+        state.sheet = null; state.dup = null; state.del = null; renderOverlay();
+        showToast({ kind: "unsure", title: kind === "del" ? "NOT SURE IT DELETED" : "NOT SURE IT SAVED", body: (r.data && r.data.message) || "Check the order before trying again." });
+        reloadAll();
       } else if (r.status === 401) {
         // signedOut() already ran
       } else {
         renderOverlay();
         showToast({ kind: "err", title: "NOT SAVED", body: (r.data && r.data.message) || "Salesforce did not accept it. Nothing was saved.", retry: r.status >= 500 || r.status === 409 });
-        if (r.data && r.data.error === "order_not_in_production") { state.sheet = null; renderOverlay(); loadOrders(true); }
+        if (r.data && /^(order_not_in_production|review_expired|box_not_found|changed|order_not_found)$/.test(r.data.error)) {
+          // The box can't be changed any more (or changed under us): close, keep it visible, re-read from Salesforce.
+          state.sheet = null; state.del = null; renderOverlay(); reloadAll();
+          state.toast.title = r.data.error === "review_expired" ? "REVIEW PERIOD ENDED" : state.toast.title; state.toast.retry = false; renderToast();
+        }
       }
     });
   }
@@ -790,8 +936,45 @@
   /* --------------------------------------------------------- events ------ */
   var handlers = {
     pin: function (el) { pinKey(el.getAttribute("data-k")); },
-    reload: function () { loadOrders(); },
-    pick: function (el) { state.selId = el.getAttribute("data-id"); state.view = "detail"; renderMain(); },
+    reload: function () { if (state.mode === "past") loadPast(); else loadOrders(); },
+    pick: function (el) {
+      if (state.mode === "past") state.pastSelId = el.getAttribute("data-id"); else state.selId = el.getAttribute("data-id");
+      state.view = "detail"; renderMain();
+    },
+    mode: function (el) {
+      var m = el.getAttribute("data-m"); if (m === state.mode) return;
+      state.mode = m; state.view = "list"; renderMain();
+      if (m === "past") loadPast(state.pastLoaded); else loadOrders(true);
+    },
+    "open-edit": function (el) {
+      var o = current(); if (!o) return;
+      var b = o.boxes.filter(function (x) { return x.id === el.getAttribute("data-id"); })[0];
+      if (!b || !canChangeBox(withWindow(b))) { showToast({ kind: "err", title: "REVIEW PERIOD ENDED", body: "This box is past its 7-day review period, so it can't be changed." }); return; }
+      var cells = {}, orig = {};
+      (b.counts || []).forEach(function (c) { var k = cellKey(c.line, c.size); cells[k] = String(c.qty); orig[k] = c.qty; });
+      var first = (b.counts && b.counts[0]) ? cellKey(b.counts[0].line, b.counts[0].size) : (o.lines[0] && o.lines[0].sizes[0] ? cellKey(0, o.lines[0].sizes[0].size) : null);
+      var word0 = garmentWordOf(b.name), num = (String(b.name).match(/\s(\d+)$/) || [])[1] || "";
+      state.box = { type: b.type, cells: cells, sel: first, requestId: newRequestId(), word: word0,
+        edit: { boxId: b.id, name0: b.name, word0: word0, num: num, at: b.at, until: b.editableUntil, orig: orig, hadSizes: !!(b.counts && b.counts.length), qty0: b.qty } };
+      state.sheet = "box"; state.toast = null; renderToast(); renderOverlay();
+    },
+    "box-word": function (el) { if (state.box) { state.box.word = el.getAttribute("data-v"); renderOverlay(); } },
+    "save-edit": function () {
+      var o = current(), b = state.box; if (!o || !b || !b.edit) return;
+      var total = boxTotal(o, b); if (!total || total > 9999 || !b.type || !b.word) return;
+      send("edit", { orderId: o.id, boxId: b.edit.boxId, type: b.type, word: b.word, counts: boxCounts(o, b), requestId: b.requestId });
+    },
+    "open-del": function (el) {
+      var o = current(); if (!o) return;
+      var b = o.boxes.filter(function (x) { return x.id === el.getAttribute("data-id"); })[0];
+      if (!b || !canChangeBox(withWindow(b))) { showToast({ kind: "err", title: "REVIEW PERIOD ENDED", body: "This box is past its 7-day review period, so it can't be deleted." }); return; }
+      state.del = { boxId: b.id, requestId: newRequestId() };
+      state.sheet = "del"; state.toast = null; renderToast(); renderOverlay();
+    },
+    "del-confirm": function () {
+      var o = current(), d = state.del; if (!o || !d) return;
+      send("del", { orderId: o.id, boxId: d.boxId, requestId: d.requestId });
+    },
     back: function () { state.view = "list"; applyZoom(); },
     mock: function () { state.mockIdx = 0; state.sheet = "mock"; renderOverlay(); },
     "v-prev": function () { state.mockIdx = Math.max(0, (state.mockIdx || 0) - 1); renderOverlay(); },
@@ -892,14 +1075,14 @@
   });
   window.addEventListener("resize", applyZoom);
   window.addEventListener("beforeunload", function (e) { if (state.saving) { e.preventDefault(); e.returnValue = ""; } });
-  document.addEventListener("visibilitychange", function () { if (!document.hidden && !state.sheet && !state.saving) loadOrders(true); });
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && !state.sheet && !state.saving) { if (state.mode === "past") loadPast(true); else loadOrders(true); } });
 
   function tickClock() {
     document.getElementById("clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   }
   setInterval(tickClock, 15000); tickClock();
   setInterval(function () {
-    if (state.user && !state.sheet && !state.saving && !document.hidden) loadOrders(true);
+    if (state.user && !state.sheet && !state.saving && !document.hidden) { if (state.mode === "past") loadPast(true); else loadOrders(true); }
   }, POLL_MS);
 
   /* ------------------------------------------------------------ start ---- */
