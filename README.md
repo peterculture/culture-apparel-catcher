@@ -24,6 +24,15 @@ Pages project, its own Salesforce connection and its own PIN list.
     Boxes logged before 10-15 (and by the flow or the dashboard) leave it blank and show just their total.
   - Sizes come from the order's own lines (`OrderItem.Size__c` is free text, so there's no fixed size list).
   - Box count = number of records.
+- **Save Box & New:** saves the box exactly like SAVE BOX; once Salesforce confirms, a fresh blank
+  box form opens for the next box. If the save fails, everything typed stays on screen.
+- **Duplicate Box:** every saved box has a DUPLICATE BOX button. It asks "How many duplicates would you
+  like to create?" (whole number 1-100) and makes that many NEW records copying the box's Packaging Type,
+  Packaging Quantity and Quantity + Size Counted. Each copy gets its own record ID and the next Garment
+  Type number (Tees 3 -> Tees 4, Tees 5 ...). The original is never changed. All copies go to Salesforce
+  in one all-or-nothing request (`/composite/sobjects`, allOrNone), so it's every copy or none.
+  A timeout is shown as "not sure" and can't be re-run straight away.
+  The box fields are defined once in `_boxes.js` and used by every way of creating a box.
 - **Stays on the board until counted:** once an order has been on the board, it stays
   there even if the print crew moves it to Post-Production early. It's marked
   "MOVED ON · FINISH COUNT" and listed first, until a catcher taps **FINISH CATCHING**.
@@ -75,6 +84,8 @@ functions/api/                  the server (Cloudflare Pages Functions)
   box-types.js                  GET  active Packaging Type values
   boxes.js                      POST log one box
   misprints.js                  POST record a misprint
+  duplicate-box.js              POST Duplicate Box (1-100 copies, all or nothing)
+  _boxes.js                     the one definition of a box record's fields + box numbering
   finish.js                     POST finish catching (box count -> Packaging_Count__c)
   mockup.js                     GET  one order's mockup picture
 tools/test.mjs                  offline tests against a pretend Salesforce

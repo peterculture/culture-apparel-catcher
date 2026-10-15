@@ -22,6 +22,7 @@ const me = await mod("me");
 const mockup = await mod("mockup");
 const finish = await mod("finish");
 const sizes = await mod("_sizes");
+const dup = await mod("duplicate-box");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -50,7 +51,7 @@ function reset() {
       { OrderId: "801000000000001AAA", Size__c: null, Quantity: 1, Product2: { Name: "Screen setup" } },
       { OrderId: "801000000000002AAA", Size__c: "XL", Color__c: "Black", Quantity: 8, Product2: { Name: "Richardson 112 Hat" } },
     ],
-    boxes: [{ Id: "a0X1", Order__c: "801000000000001AAA", Name: "Tees 1", Packaging_Type__c: "Standard Culture Box", Packaging_Quantity__c: 30, CreatedDate: "2026-10-14T15:00:00.000+0000", CreatedBy: { Name: "Catcher App" } }],
+    boxes: [{ Id: "a0X000000000001AAA", Order__c: "801000000000001AAA", Name: "Tees 1", Packaging_Type__c: "Standard Culture Box", Packaging_Quantity__c: 30, CreatedDate: "2026-10-14T15:00:00.000+0000", CreatedBy: { Name: "Catcher App" } }],
     designs: [{ Opportunity__c: "006000000000001AAA", Mockup_URL__c: "https://cultureapparel.file.force.com/sfc/servlet.shepherd/version/download/068000000000001AAA" }],
   };
 }
@@ -116,6 +117,19 @@ globalThis.fetch = async (url, init = {}) => {
     const b = JSON.parse(init.body); const id = "a0X" + (db.boxes.length + 1);
     db.boxes.push(Object.assign({ Id: id, CreatedDate: new Date().toISOString(), CreatedBy: { Name: "Catcher App" } }, b));
     return res(201, { id, success: true, errors: [] });
+  }
+  if (u.pathname.endsWith("/composite/sobjects") && method === "POST") {
+    if (behave.dupTimeout) throw new Error("timeout");
+    const b = JSON.parse(init.body);
+    if (behave.dupReject) return res(400, b.records.map((r, i) => ({ success: false, errors: i === 0
+      ? [{ statusCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "Packaging is locked" }]
+      : [{ statusCode: "ALL_OR_NONE_OPERATION_ROLLED_BACK", message: "Record rolled back because not all records were valid and the request was using AllOrNone header" }] })));
+    return res(200, b.records.map((r) => {
+      const id = "a0X" + String(db.boxes.length + 1).padStart(15, "0");
+      const { attributes, ...fields } = r;
+      db.boxes.push(Object.assign({ Id: id, CreatedDate: new Date().toISOString(), CreatedBy: { Name: "Catcher App" } }, fields));
+      return { id, success: true, errors: [] };
+    }));
   }
   const om = u.pathname.match(/\/sobjects\/Order\/(\w+)$/);
   if (om && method === "PATCH") {
@@ -458,6 +472,70 @@ await test("Mixed box: two garments from the order in one box", async () => {
   ok(/Navy Gildan 5000 Tee: M 5/.test(saved.Quantity_Size_Counted__c) && /Ivory Comfort Colors 3023CL: XL 4/.test(saved.Quantity_Size_Counted__c), "both garments written: " + saved.Quantity_Size_Counted__c);
   const l1 = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders[0];
   ok(l1.lines[ivory].sizes[0].boxed === 4, "Ivory XL boxed-so-far = 4");
+});
+
+await test("Duplicate Box: exact copies, own records, original untouched", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const O = "801000000000001AAA";
+  // a size-counted source box
+  await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: O, type: "Culture Hat Box", name: "Tees 2", requestId: "req-dsrc0001",
+    counts: [{ line: 0, size: "S", qty: 8 }, { line: 0, size: "M", qty: 15 }] }, cookie), env });
+  const srcRec = db.boxes[db.boxes.length - 1];
+  srcRec.Id = "a0X000000000000SRC";
+  const before = JSON.stringify(srcRec);
+  const dupReq = (count, id, boxId = srcRec.Id) => dup.onRequestPost({ request: req("POST", "/api/duplicate-box", { orderId: O, boxId, count, requestId: id }, cookie), env });
+  const n0 = db.boxes.length;
+
+  let r = await dupReq(1, "req-dup00001"); let d = await r.json();
+  ok(r.status === 201 && d.created === 1 && d.boxes.length === 1, "duplicate 1 -> exactly 1 created");
+  ok(db.boxes.length === n0 + 1, "exactly 1 new record in Salesforce");
+  const c1 = db.boxes[db.boxes.length - 1];
+  ok(c1.Name === "Tees 3" && c1.Packaging_Type__c === "Culture Hat Box" && c1.Packaging_Quantity__c === 23 && c1.Quantity_Size_Counted__c === "S 8 · M 15 = 23" && c1.Order__c === O,
+    "copy has next Garment Type number, same Packaging Type, total and full size breakdown");
+  ok(c1.Id !== srcRec.Id, "copy has its own record ID");
+
+  r = await dupReq(25, "req-dup00002"); d = await r.json();
+  ok(r.status === 201 && d.created === 25, "duplicate 25 -> 25 created");
+  ok(db.boxes.length === n0 + 26, "exactly 25 more records");
+  const names = db.boxes.slice(-25).map((b) => b.Name);
+  ok(names[0] === "Tees 4" && names[24] === "Tees 28" && new Set(db.boxes.slice(-25).map((b) => b.Id)).size === 25, "Tees 4 ... Tees 28, 25 different IDs");
+  ok(db.boxes.slice(-25).every((b) => b.Quantity_Size_Counted__c === "S 8 · M 15 = 23" && b.Packaging_Quantity__c === 23), "every copy keeps the complete size breakdown");
+  ok(JSON.stringify(srcRec) === before, "original box unchanged");
+  ok(posts("/composite/sobjects").length === 2 && JSON.parse(posts("/composite/sobjects")[1].body).allOrNone === true, "one all-or-nothing request per duplicate");
+
+  const n1 = db.boxes.length;
+  r = await dupReq(25, "req-dup00002");
+  ok(r.status === 201 && db.boxes.length === n1 && posts("/composite/sobjects").length === 2, "same request again (double tap / retry) -> same answer, nothing new created");
+
+  for (const bad of [0, -3, 2.5, 101, "5", null]) {
+    r = await dupReq(bad, "req-dupbad" + String(bad).replace(/\W/g, "x"));
+    ok(r.status === 400, "count " + JSON.stringify(bad) + " refused");
+  }
+  ok(db.boxes.length === n1, "refused counts created nothing");
+
+  r = await dup.onRequestPost({ request: req("POST", "/api/duplicate-box", { orderId: "801000000000002AAA", boxId: srcRec.Id, count: 2, requestId: "req-dup00003" }, cookie), env });
+  ok(r.status === 409 && db.boxes.length === n1, "a box from another order can't be copied onto this one");
+
+  behave.dupReject = true;
+  r = await dupReq(10, "req-dup00004"); d = await r.json();
+  ok(r.status === 422 && /Packaging is locked/.test(d.message) && /None of the 10/.test(d.message) && db.boxes.length === n1, "Salesforce refuses -> its reason shown, none created");
+  behave.dupReject = false;
+  r = await dupReq(10, "req-dup00004");
+  ok(r.status === 201 && db.boxes.length === n1 + 10, "after a refusal, Try again works");
+
+  behave.dupTimeout = true;
+  r = await dupReq(5, "req-dup00005"); d = await r.json();
+  ok(r.status === 504 && d.error === "unconfirmed", "no answer -> 'not sure', not 'failed'");
+  behave.dupTimeout = false;
+  const n2 = db.boxes.length;
+  r = await dupReq(5, "req-dup00005");
+  ok(r.status === 409 && db.boxes.length === n2, "an immediate retry of an unconfirmed batch is blocked (no extra boxes)");
+
+  // an old box with no size breakdown copies its total only
+  const oldBox = db.boxes.find((b) => b.Id === "a0X000000000001AAA");
+  r = await dupReq(2, "req-dup00006", oldBox.Id); d = await r.json();
+  const last2 = db.boxes.slice(-2);
+  ok(r.status === 201 && last2.every((b) => b.Packaging_Quantity__c === 30 && !("Quantity_Size_Counted__c" in b)), "old box without sizes -> copies keep its total, no made-up sizes");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

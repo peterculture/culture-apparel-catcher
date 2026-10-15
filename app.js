@@ -389,7 +389,7 @@
     }).join("");
     var log = o.boxes.map(function (b, i) {
       return '<div class="log-row"><span class="log-icon">' + (i + 1) + '</span><span class="log-text">“' + esc(b.name) + "” · " + esc(b.type) + " · " + b.qty + " garments" +
-        (b.sizes ? '<span class="log-sizes">' + esc(b.sizes) + "</span>" : "") + '</span><span class="log-who">' + esc(b.by) + (b.at ? " · " + fmtTime(b.at) : "") + "</span></div>";
+        (b.sizes ? '<span class="log-sizes">' + esc(b.sizes) + "</span>" : "") + '</span><button class="log-dup" data-act="open-dup" data-id="' + esc(b.id) + '">DUPLICATE BOX</button><span class="log-who">' + esc(b.by) + (b.at ? " · " + fmtTime(b.at) : "") + "</span></div>";
     }).join("");
     var misLog = o.misprintNotes ? '<div class="sec-label" style="margin-top:.6rem">MISPRINT NOTES IN SALESFORCE</div><div class="notes">' + esc(o.misprintNotes.split(" | ").join("\n")) + "</div>" : "";
     var banner = o.inProduction ? "" : '<div class="moved-banner">' + ICON.warn +
@@ -454,8 +454,14 @@
     boxCounts(o, b).forEach(function (c) { used[shortFor(o.lines[c.line].product)] = 1; });
     var words = Object.keys(used);
     var short = words.length ? words.join(" + ") : shortFor(o.lines[0] ? o.lines[0].product : "");
-    var n = o.boxes.filter(function (x) { return String(x.name).indexOf(short + " ") === 0 || x.name === short; }).length + 1;
-    return short + " " + n;
+    // Next number after the highest one already used for this Garment Type (same rule as the server).
+    var top = 0;
+    o.boxes.forEach(function (x) {
+      var nm = String(x.name || "");
+      if (nm === short) top = Math.max(top, 1);
+      else if (nm.indexOf(short + " ") === 0 && /^\d+$/.test(nm.slice(short.length + 1))) top = Math.max(top, Number(nm.slice(short.length + 1)));
+    });
+    return short + " " + (top + 1);
   }
 
   function sizeLeft(s) {
@@ -503,8 +509,43 @@
       '<div class="total-bar' + (total ? " on" : "") + '"><div><div class="l">TOTAL IN THIS BOX</div><div class="v" aria-live="polite">' + total + "</div></div>" +
       '<div class="gt">Garment Type<b>' + esc(boxName(o, b)) + "</b></div></div>" +
       (total > 9999 ? '<div class="fin-warn">One box can hold at most 9999 garments.</div>' : "") +
-      '<button class="save' + (state.saving ? " busy" : "") + '" data-act="save-box"' + (ready && !state.saving ? "" : " disabled") + ">" +
-      (state.saving ? '<span class="spin"></span>' : "") + label + "</button></div></div>";
+      '<div class="save-row"><button class="save' + (state.saving ? " busy" : "") + '" data-act="save-box"' + (ready && !state.saving ? "" : " disabled") + ">" +
+      (state.saving ? '<span class="spin"></span>' : "") + label + "</button>" +
+      '<button class="save alt" data-act="save-box-new"' + (ready && !state.saving ? "" : " disabled") + ">SAVE BOX &amp; NEW</button></div></div></div>";
+  }
+
+  var MAX_DUP = 100;
+  /** A whole number from 1 to 100, or 0 if the entry isn't one. */
+  function dupCount(v) {
+    var s = String(v == null ? "" : v);
+    if (!/^[0-9]{1,3}$/.test(s)) return 0;
+    var n = parseInt(s, 10);
+    return n >= 1 && n <= MAX_DUP ? n : 0;
+  }
+
+  function dupSheetHtml(o) {
+    var d = state.dup, src = o.boxes.filter(function (b) { return b.id === d.boxId; })[0];
+    if (!src) return "";
+    var n = dupCount(d.n), raw = d.n || "";
+    var problem = !raw ? "Enter a number." : !n ? (parseInt(raw, 10) > MAX_DUP ? "The most is " + MAX_DUP + " at a time." : "Use a whole number from 1 to " + MAX_DUP + ".") : "";
+    var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "<"].map(function (k) {
+      var label = k === "<" ? "⌫" : k === "C" ? "CLR" : k;
+      return '<button data-act="dup-key" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '"' + (state.saving ? " disabled" : "") + ' aria-label="' + (k === "<" ? "Delete last digit" : k === "C" ? "Clear" : k) + '">' + label + "</button>";
+    }).join("");
+    return '<div class="scrim"><div class="sheet" role="dialog" aria-label="Duplicate box">' +
+      '<div class="sheet-head"><div class="sheet-title"><h2>DUPLICATE BOX · ' + esc(o.num) + "</h2>" +
+      "<p>Copies “" + esc(src.name) + "”. The original box is not changed.</p></div>" +
+      '<button class="x" data-act="close" aria-label="Close"' + (state.saving ? " disabled" : "") + ">" + ICON.x + "</button></div>" +
+      '<div class="dup-src"><div><span class="l">PACKAGING TYPE</span>' + esc(src.type) + "</div>" +
+      "<div><span class=\"l\">QUANTITY + SIZE COUNTED</span>" + esc(src.sizes || (src.qty + " garments (no size breakdown on this box)")) + "</div></div>" +
+      '<div class="row2"><div class="grow"><div class="sec-label">HOW MANY DUPLICATES WOULD YOU LIKE TO CREATE?</div>' +
+      '<div class="stepper dup-stepper"><button data-act="dup-step" data-d="-1" aria-label="One fewer"' + (state.saving || n <= 1 ? " disabled" : "") + '>−</button>' +
+      '<div class="v' + (n ? "" : " bad") + '" aria-live="polite">' + (raw || "–") + '</div><button data-act="dup-step" data-d="1" aria-label="One more"' + (state.saving || n >= MAX_DUP ? " disabled" : "") + ">+</button></div>" +
+      '<div class="hint">' + (problem ? '<span class="dup-bad">' + problem + "</span>" : "Creates " + n + " new " + (n === 1 ? "box" : "boxes") + ": " + n * src.qty + " garments in all, each with its own record in Salesforce.") + "</div></div>" +
+      '<div class="pad">' + keys + "</div></div>" +
+      '<div class="save-row"><button class="save alt" data-act="close"' + (state.saving ? " disabled" : "") + ">CANCEL</button>" +
+      '<button class="save' + (state.saving ? " busy" : "") + '" data-act="dup-confirm"' + (n && !state.saving ? "" : " disabled") + ">" +
+      (state.saving ? '<span class="spin"></span>CREATING ' + n + (n === 1 ? " BOX" : " BOXES") + " IN SALESFORCE…" : "CONFIRM · CREATE " + (n || "") + (n === 1 ? " BOX" : " BOXES")) + "</button></div></div></div>";
   }
 
   function misSheetHtml(o) {
@@ -555,6 +596,7 @@
     if (state.sheet === "box") $overlay.innerHTML = boxSheetHtml(o);
     else if (state.sheet === "mis") $overlay.innerHTML = misSheetHtml(o);
     else if (state.sheet === "fin") $overlay.innerHTML = finSheetHtml(o);
+    else if (state.sheet === "dup") $overlay.innerHTML = dupSheetHtml(o);
     else if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); fillMockups($overlay); setupViewer(); }
     if (active) {
       var el = document.getElementById("mis-note");
@@ -578,17 +620,33 @@
   }
 
   /* ------------------------------------------------------------- saving -- */
-  function send(kind, payload) {
+  function send(kind, payload, opts) {
     if (state.saving) return;                 // a second tap does nothing
-    state.saving = true; state.pending = { kind: kind, payload: payload };
+    opts = opts || {};
+    state.saving = true; state.pending = { kind: kind, payload: payload, opts: opts };
     state.toast = null; renderToast(); renderOverlay();
-    var path = kind === "box" ? "/api/boxes" : kind === "fin" ? "/api/finish" : "/api/misprints";
+    var path = kind === "box" ? "/api/boxes" : kind === "fin" ? "/api/finish" : kind === "dup" ? "/api/duplicate-box" : "/api/misprints";
     api("POST", path, payload).then(function (r) {
       state.saving = false;
+      if (r.ok && kind === "dup" && r.data && r.data.error === "partial") {
+        // Some copies exist, some don't: say exactly that, and never retry the whole batch.
+        state.pending = null;
+        var po = current();
+        if (po) Array.prototype.push.apply(po.boxes, r.data.boxes || []);
+        state.sheet = null; state.dup = null; renderOverlay(); renderMain();
+        showToast({ kind: "err", title: r.data.created + " CREATED · " + r.data.failed + " NOT CREATED", body: r.data.message || "" });
+        loadOrders(true);
+        return;
+      }
       if (r.ok) {
         state.pending = null;
         var o = current();
-        if (kind === "box" && o && r.data.box) {
+        if (kind === "dup" && o && r.data.boxes) {
+          Array.prototype.push.apply(o.boxes, r.data.boxes);
+          var bx = r.data.boxes, first = bx[0], last = bx[bx.length - 1];
+          showToast({ kind: "ok", title: bx.length + (bx.length === 1 ? " BOX CREATED" : " BOXES CREATED"),
+            body: (bx.length === 1 ? "“" + first.name + "”" : "“" + first.name + "” to “" + last.name + "”") + " · " + (first.sizes ? first.sizes.replace(/ = \d+$/, "") + " · " : "") + first.qty + " garments each · " + first.type + ". All confirmed by Salesforce on " + o.num + "." });
+        } else if (kind === "box" && o && r.data.box) {
           o.boxes.push(r.data.box);
           showToast({ kind: "ok", title: "BOX SAVED", body: "“" + r.data.box.name + "” · " + (r.data.box.sizes ? r.data.box.sizes.replace(/ = \d+$/, "") + " · " : "") + r.data.box.qty + " garments · " + r.data.box.type + " is in Salesforce on " + o.num + "." });
         } else if (kind === "fin" && o) {
@@ -603,11 +661,15 @@
           var mp = r.data.misprint;
           showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + ". The print shop has been notified." });
         }
-        state.sheet = null; state.box = null; state.mis = null; state.fin = null;
-        renderOverlay(); renderMain();
+        state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null;
+        if (kind === "box" && opts.andNew && o) {
+          // SAVE BOX & NEW: only now that Salesforce has confirmed, open a fresh, blank box.
+          state.box = newBox(o); state.sheet = "box";
+        }
+        renderOverlay(); renderMain(); renderToast();
         loadOrders(true);                      // pull the real numbers back from Salesforce
       } else if (r.status === 0 || (r.data && r.data.error === "unconfirmed") || (r.data && r.data.error === "in_progress")) {
-        state.sheet = null; renderOverlay();
+        state.sheet = null; state.dup = null; renderOverlay();
         showToast({ kind: "unsure", title: "NOT SURE IT SAVED", body: (r.data && r.data.message) || "Check the order before trying again." });
         loadOrders(true);
       } else if (r.status === 401) {
@@ -620,11 +682,18 @@
     });
   }
 
-  function saveBox() {
+  function saveBox(andNew) {
     var o = current(), b = state.box; if (!o || !b) return;
     var counts = boxCounts(o, b), total = boxTotal(o, b);
     if (!total || total > 9999 || !b.type) return;
-    send("box", { orderId: o.id, type: b.type, counts: counts, name: boxName(o, b), requestId: b.requestId });
+    send("box", { orderId: o.id, type: b.type, counts: counts, name: boxName(o, b), requestId: b.requestId }, { andNew: !!andNew });
+  }
+
+  /** A fresh, blank box form (default Packaging Type, nothing counted, new one-time save id). */
+  function newBox(o) {
+    var def = state.boxTypes.filter(function (t) { return t.isDefault; })[0];
+    var first = o && o.lines[0] && o.lines[0].sizes[0];
+    return { type: def ? def.value : "", cells: {}, sel: first ? cellKey(0, first.size) : null, requestId: newRequestId() };
   }
   function saveMis() {
     var o = current(), m = state.mis; if (!o || !m || !m.size || !m.reason) return;
@@ -729,9 +798,7 @@
     "v-next": function () { var o = current(); state.mockIdx = Math.min(((o && o.mockupCount) || 1) - 1, (state.mockIdx || 0) + 1); renderOverlay(); },
     "open-box": function () {
       if (!state.boxTypes.length) api("GET", "/api/box-types").then(function (r) { if (r.ok) { state.boxTypes = r.data.types || []; renderOverlay(); } });
-      var def = state.boxTypes.filter(function (t) { return t.isDefault; })[0];
-      var o = current(), first = o && o.lines[0] && o.lines[0].sizes[0];
-      state.box = { type: def ? def.value : "", cells: {}, sel: first ? cellKey(0, first.size) : null, requestId: newRequestId() };
+      state.box = newBox(current());
       state.sheet = "box"; state.toast = null; renderToast(); renderOverlay();
     },
     "open-mis": function () {
@@ -760,7 +827,31 @@
       o.lines.forEach(function (l, li) { l.sizes.forEach(function (s) { all.push(cellKey(li, s.size)); }); });
       var i = all.indexOf(b.sel); b.sel = all[(i + 1) % all.length]; renderOverlay();
     },
-    "save-box": saveBox,
+    "save-box": function () { saveBox(false); },
+    "save-box-new": function () { saveBox(true); },
+    "open-dup": function (el) {
+      var o = current(); if (!o) return;
+      var src = o.boxes.filter(function (b) { return b.id === el.getAttribute("data-id"); })[0];
+      if (!src) return;
+      state.dup = { boxId: src.id, n: "1", requestId: newRequestId() };
+      state.sheet = "dup"; state.toast = null; renderToast(); renderOverlay();
+    },
+    "dup-key": function (el) {
+      if (state.saving || !state.dup) return;
+      var k = el.getAttribute("data-k"), v = state.dup.n || "";
+      if (k === "C") v = ""; else if (k === "<") v = v.slice(0, -1); else if (v.length < 3) v = (v === "0" ? "" : v) + k;
+      state.dup.n = v; renderOverlay();
+    },
+    "dup-step": function (el) {
+      if (state.saving || !state.dup) return;
+      var n = (parseInt(state.dup.n || "0", 10) || 0) + Number(el.getAttribute("data-d"));
+      state.dup.n = String(Math.max(1, Math.min(MAX_DUP, n))); renderOverlay();
+    },
+    "dup-confirm": function () {
+      var o = current(), d = state.dup; if (!o || !d) return;
+      var n = dupCount(d.n); if (!n) return;
+      send("dup", { orderId: o.id, boxId: d.boxId, count: n, requestId: d.requestId });
+    },
     "open-fin": function () {
       var o = current(); if (!o || !o.boxes.length) return;
       state.fin = { requestId: newRequestId() };
@@ -773,7 +864,7 @@
     "mis-minus": function () { state.mis.qty = Math.max(1, state.mis.qty - 1); renderOverlay(); },
     "mis-plus": function () { state.mis.qty = Math.min(99, state.mis.qty + 1); renderOverlay(); },
     "save-mis": saveMis,
-    retry: function () { if (state.pending) { var p = state.pending; state.pending = null; send(p.kind, p.payload); } },
+    retry: function () { if (state.pending) { var p = state.pending; state.pending = null; send(p.kind, p.payload, p.opts); } },
     dismiss: function () { clearTimeout(toastTimer); state.toast = null; renderToast(); },
     "v-in": function () { zoomAt(vz.k * 1.5, 0, 0); },
     "v-out": function () { zoomAt(vz.k / 1.5, 0, 0); },

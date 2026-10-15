@@ -17,7 +17,8 @@
 import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
-import { SIZE_FIELD, buildBreakdown } from "./_sizes.js";
+import { buildBreakdown } from "./_sizes.js";
+import { boxFields } from "./_boxes.js";
 
 export async function onRequestPost({ request, env }) {
   const auth = await requireUser(request, env);
@@ -79,13 +80,7 @@ export async function onRequestPost({ request, env }) {
     const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/Order_Packaging__c`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        Name: boxName,
-        Order__c: order.id,
-        Packaging_Type__c: type,
-        Packaging_Quantity__c: qty,
-        ...(breakdown ? { [SIZE_FIELD]: breakdown } : {}),
-      }),
+      body: JSON.stringify(boxFields({ orderId: order.id, name: boxName, type, qty, breakdown })),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status !== 201 || !data || !data.id || data.success === false) {

@@ -250,3 +250,13 @@ img[data-mock].ready + .mock-wait { display: none; }
 .pad-for { font: 600 .85rem/1.2 'Oswald'; letter-spacing: .1em; color: var(--text-muted); text-align: center; }
 .pad-for b { color: var(--text-primary); }
 .log-sizes { display: block; margin-top: .25rem; font: 500 .9rem/1.35 'Archivo'; color: var(--text-tertiary); }
+
+/* ---------- Save Box & New / Duplicate Box ---------- */
+.save-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: .8rem; }
+.save.alt { background: var(--surface-card); border: 2px solid var(--accent); color: var(--text-primary); }
+.save.alt:disabled { background: var(--surface-card); border-color: var(--border); color: var(--text-ghost); }
+.log-dup { flex-shrink: 0; min-height: 3.2rem; padding: 0 1rem; border-radius: .7rem; border: 1px solid var(--border-strong); background: #1a1a1f; font: 600 .85rem/1 'Oswald'; letter-spacing: .08em; }
+.dup-src { display: grid; gap: .6rem; padding: .9rem 1.1rem; border-radius: .9rem; background: var(--surface-card); border: 1px solid var(--border-card); font: 500 1.05rem/1.35 'Archivo'; }
+.dup-src .l { display: block; font: 600 .72rem/1 'Oswald'; letter-spacing: .12em; color: var(--text-muted); margin-bottom: .3rem; }
+.dup-stepper .v.bad { color: var(--text-ghost); }
+.dup-bad { color: var(--danger-text); font-weight: 600; }
