@@ -6,7 +6,10 @@
  *                   This app's OWN list, separate from the dashboard's.
  *   SESSION_SECRET  a long random string used to sign the cookie
  * Optional:
- *   SESSION_HOURS   how long a sign-in lasts (default 12)
+ *   SESSION_MINUTES how long a sign-in lasts (default 5, Anthony 2026-10-15: every
+ *                   catcher signs in again every 5 minutes, so boxes are credited to
+ *                   the right person). Counted on THIS server's clock, inside the
+ *                   signed cookie, so a tablet can't stretch it.
  *   CATCHER_KV      a KV namespace binding. When present it is used to slow
  *                   down PIN guessing and to recognise a repeated save.
  *
@@ -67,19 +70,33 @@ export function matchPin(env, pin) {
   return found;
 }
 
+export function sessionSeconds(env) {
+  return Math.round(Math.min(60, Math.max(1, Number(env.SESSION_MINUTES) || 5)) * 60);
+}
+
+/** Returns { cookie, expiresIn } -- expiresIn in seconds, by the server's clock. */
 export async function issueCookie(env, name) {
   if (!env.SESSION_SECRET || env.SESSION_SECRET.length < 16) {
     const e = new Error("SESSION_SECRET missing"); e.code = "no_secret"; throw e;
   }
-  const hours = Math.min(24, Math.max(1, Number(env.SESSION_HOURS) || 12));
+  const secs = sessionSeconds(env);
   const now = Math.floor(Date.now() / 1000);
-  const payload = b64url(enc.encode(JSON.stringify({ n: name, iat: now, exp: now + hours * 3600 })));
+  // sid: this sign-in's own id, so a logout can cancel exactly this sign-in on the server.
+  const sid = b64url(crypto.getRandomValues(new Uint8Array(12)));
+  const payload = b64url(enc.encode(JSON.stringify({ n: name, iat: now, exp: now + secs, sid })));
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(env.SESSION_SECRET), enc.encode(payload)));
-  return `${COOKIE}=${payload}.${b64url(sig)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${hours * 3600}`;
+  return { cookie: `${COOKIE}=${payload}.${b64url(sig)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${secs}`, expiresIn: secs };
 }
 
 export function clearCookie() {
   return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
+}
+
+/** Cancel this sign-in on the server (logout), so a copied cookie stops working too. */
+export async function revokeSession(request, env) {
+  const s = await readSession(request, env);
+  if (s && s.sid && env.CATCHER_KV) await env.CATCHER_KV.put("revoked:" + s.sid, "1", { expirationTtl: 3600 });
+  return s;
 }
 
 /** The signed-in catcher, or null. Someone removed from CATCHER_PINS is signed out at once. */
@@ -100,7 +117,8 @@ export async function readSession(request, env) {
   const now = Math.floor(Date.now() / 1000);
   if (!data || typeof data.n !== "string" || !Number.isFinite(data.exp) || data.exp < now) return null;
   if (!roster(env).has(data.n)) return null;
-  return { name: data.n };
+  if (data.sid && env.CATCHER_KV && await env.CATCHER_KV.get("revoked:" + data.sid)) return null;
+  return { name: data.n, sid: data.sid || "", expiresIn: Math.max(0, data.exp - now) };
 }
 
 /** Use at the top of every protected endpoint: returns {user} or {response}. */

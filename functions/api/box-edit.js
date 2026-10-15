@@ -48,6 +48,7 @@ export async function onRequestPost({ request, env }) {
       const name = num ? `${word} ${num}` : word;
       const fields = boxFields({ orderId: order.id, name, type, qty: checked.qty, breakdown: checked.breakdown });
       delete fields.Order__c;                              // the box stays on its order
+      // Counted By is not touched: it stays the catcher who counted the box (boxFields only adds it when given).
 
       const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/Order_Packaging__c/${box.id}`, {
         method: "PATCH",

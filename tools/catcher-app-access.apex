@@ -79,7 +79,7 @@ Map<String, Boolean> fields = new Map<String, Boolean>{
     'Order.Packaging_Count__c' => true,
     'OrderItem.Size__c' => false, 'OrderItem.Color__c' => false,
     'Order_Packaging__c.Order__c' => true, 'Order_Packaging__c.Packaging_Type__c' => true,
-    'Order_Packaging__c.Packaging_Quantity__c' => true, 'Order_Packaging__c.Quantity_Size_Counted__c' => true
+    'Order_Packaging__c.Packaging_Quantity__c' => true, 'Order_Packaging__c.Quantity_Size_Counted__c' => true, 'Order_Packaging__c.CountedBy__c' => true
 };
 Map<String, FieldPermissions> haveFld = new Map<String, FieldPermissions>();
 for (FieldPermissions fp : [SELECT Id, Field FROM FieldPermissions WHERE ParentId = :ps.Id]) haveFld.put(fp.Field, fp);

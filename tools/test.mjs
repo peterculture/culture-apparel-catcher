@@ -19,6 +19,7 @@ const orders = await mod("orders");
 const boxes = await mod("boxes");
 const mis = await mod("misprints");
 const me = await mod("me");
+const logout = await mod("logout");
 const mockup = await mod("mockup");
 const finish = await mod("finish");
 const sizes = await mod("_sizes");
@@ -255,7 +256,7 @@ await test("Log a box", async () => {
   const p = posts("Order_Packaging__c")[0]; const sent = JSON.parse(p.body);
   ok(sent.Name === "Tees 2" && sent.Order__c === "801000000000001AAA" && sent.Packaging_Type__c === "Standard Culture Box" && sent.Packaging_Quantity__c === 24,
     "writes exactly Name, Order__c, Packaging_Type__c, Packaging_Quantity__c");
-  ok(Object.keys(sent).length === 4, "and nothing else");
+  ok(sent.CountedBy__c === "Maria R." && Object.keys(sent).length === 5, "plus Counted By = the signed-in catcher, and nothing else");
   ok(d.boxCount === 2 && d.boxed === 54, "reports the new totals");
   // same request again (double tap / retry after a dropped answer)
   r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", body, cookie), env });
@@ -642,6 +643,61 @@ await test("Edit Box: someone else changed the box first -> not overwritten", as
   globalThis.fetch = realFetch;
   const d = await r.json();
   ok(r.status === 409 && d.error === "changed" && db.boxes[0].Packaging_Quantity__c === 10, "412 from Salesforce -> 'someone changed this box', nothing overwritten");
+});
+
+await test("5-minute sign-in: ends on the server's clock; logout cancels it; saves need a live sign-in", async () => {
+  reset(); const env = ENV();
+  const lr = await login.onRequestPost({ request: req("POST", "/api/login", { pin: "4821" }), env });
+  const ld = await lr.json();
+  const set = lr.headers.get("Set-Cookie"); const cookie = set.split(";")[0];
+  ok(ld.expiresIn === 300 && /Max-Age=300/.test(set), "sign-in lasts 5 minutes (300 s)");
+  let r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
+  let d = await r.json();
+  ok(r.status === 200 && d.name === "Maria R." && d.expiresIn > 295 && d.expiresIn <= 300, "/api/me says who and how long is left");
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + 4 * 60 * 1000 + 50 * 1000;               // 4:50 later: still signed in
+    r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
+    d = await r.json();
+    ok(r.status === 200 && d.expiresIn <= 10, "at 4:50 still signed in, ~10 s left");
+    Date.now = () => realNow() + 5 * 60 * 1000 + 1000;                    // 5:01 later
+    r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
+    ok(r.status === 401, "after 5 minutes the server says signed out");
+    r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", qty: 5, name: "Tees 9", requestId: "req-exp00001" }, cookie), env });
+    ok(r.status === 401 && posts("/sobjects/Order_Packaging__c").length === 0, "an expired sign-in can't save a box");
+    r = await dup.onRequestPost({ request: req("POST", "/api/duplicate-box", { orderId: "801000000000001AAA", boxId: "a0X000000000001AAA", count: 2, requestId: "req-exp00002" }, cookie), env });
+    ok(r.status === 401, "... or duplicate");
+    r = await bedit.onRequestPost({ request: req("POST", "/api/box-edit", { orderId: "801000000000001AAA", boxId: "a0X000000000001AAA", type: "Standard Culture Box", word: "Tees", counts: [{ line: 0, size: "S", qty: 1 }], requestId: "req-exp00003" }, cookie), env });
+    ok(r.status === 401, "... or edit");
+    r = await bdel.onRequestPost({ request: req("POST", "/api/box-delete", { orderId: "801000000000001AAA", boxId: "a0X000000000001AAA", requestId: "req-exp00004" }, cookie), env });
+    ok(r.status === 401 && db.boxes.length === 1, "... or delete");
+  } finally { Date.now = realNow; }
+
+  // logout cancels the sign-in on the server: the same cookie no longer works
+  const c2 = await signIn(env, "1937");
+  ok((await me.onRequestGet({ request: req("GET", "/api/me", null, c2), env })).status === 200, "Dev T. signed in");
+  const lo = await logout.onRequestPost({ request: req("POST", "/api/logout", null, c2), env });
+  ok(/Max-Age=0/.test(lo.headers.get("Set-Cookie")), "logout clears the cookie on the tablet");
+  r = await me.onRequestGet({ request: req("GET", "/api/me", null, c2), env });
+  ok(r.status === 401, "and the old cookie is refused even if re-sent (cancelled on the server)");
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", qty: 5, name: "Tees 9", requestId: "req-exp00005" }, c2), env });
+  ok(r.status === 401, "a logged-out cookie can't save");
+});
+
+await test("Counted By: new boxes and duplicates get the signed-in catcher; edits keep the original", async () => {
+  reset(); const env = ENV();
+  const maria = await signIn(env, "4821"), dev = await signIn(env, "1937");
+  const O = "801000000000001AAA";
+  await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: O, type: "Standard Culture Box", name: "Tees 2", requestId: "req-cby00001", counts: [{ line: 0, size: "S", qty: 4 }] }, maria), env });
+  const b = db.boxes[db.boxes.length - 1]; b.Id = "a0X000000000030AAA"; b.LastModifiedDate = b.CreatedDate;
+  ok(b.CountedBy__c === "Maria R.", "box logged by Maria -> Counted By 'Maria R.'");
+  await dup.onRequestPost({ request: req("POST", "/api/duplicate-box", { orderId: O, boxId: b.Id, count: 2, requestId: "req-cby00002" }, dev), env });
+  ok(db.boxes.slice(-2).every((x) => x.CountedBy__c === "Dev T."), "duplicates made by Dev -> Counted By 'Dev T.'");
+  const r = await bedit.onRequestPost({ request: req("POST", "/api/box-edit", { orderId: O, boxId: b.Id, type: "Standard Culture Box", word: "Tees", counts: [{ line: 0, size: "S", qty: 6 }], requestId: "req-cby00003" }, dev), env });
+  ok(r.status === 200 && b.CountedBy__c === "Maria R." && b.Packaging_Quantity__c === 6, "Dev edits Maria's box -> Counted By stays 'Maria R.'");
+  const l = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, maria), env })).json()).orders[0];
+  const shown = l.boxes.find((x) => x.id === b.Id);
+  ok(shown.by === "Maria R." && l.boxes.find((x) => x.name === "Tees 1").by === "Catcher App", "app shows Counted By; old boxes fall back to Created By");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

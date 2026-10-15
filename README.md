@@ -47,6 +47,20 @@ Pages project, its own Salesforce connection and its own PIN list.
   does; it goes to Salesforce's Recycle Bin). Checked 10-15: nothing in Salesforce looks up to Order
   Packaging, and it has no flows, triggers, validation rules or Rollup Helper rollups. If the order was
   already finished, its Packaging Count is set to the new number of boxes.
+- **5-minute sign-in:** every sign-in lasts 5 minutes (`SESSION_MINUTES`), counted on the server's
+  clock inside the signed cookie, so a tablet can't stretch it, and every save after that is refused.
+  The header counts down (amber in the last minute, with a warning). A save already on its way
+  finishes first, then the tablet signs out. Signing out also cancels the sign-in on the server (KV
+  `revoked:<id>`). Unsaved entries are kept only for the SAME catcher and reopen when they sign in
+  again; the next catcher never gets them. The tablet's countdown uses a stopwatch
+  (`performance.now`), not the clock, and re-checks with the server when the tablet wakes.
+- **Counted By** (`Order_Packaging__c.CountedBy__c`, Text 80): the signed-in catcher, written on every
+  new box and duplicate; an edit keeps the original counter. Salesforce's Created By always says
+  "Catcher App" (one app login), so this is the field that says who counted. Older boxes fall back to
+  Created By.
+- **No jumping while counting:** the box form is updated in place (only the changed numbers and
+  buttons), not rebuilt, so the form stays where it is while sizes are entered. The number pad stays
+  pinned in view next to the lower sizes.
 - **Stays on the board until counted:** once an order has been on the board, it stays
   there even if the print crew moves it to Post-Production early. It's marked
   "MOVED ON · FINISH COUNT" and listed first, until a catcher taps **FINISH CATCHING**.
@@ -122,7 +136,7 @@ Build command: *(none)*. Build output directory: `/`.
 | `SESSION_SECRET` | 40+ random characters |
 | `CATCHER_PINS` | `{"Maria R.":"4821","Dev T.":"1937"}`: each catcher's name and 4-digit PIN |
 
-**Optional:** `SESSION_HOURS` (default 12), `PRINTER_NAMES` (comma list overriding the two
+**Optional:** `SESSION_MINUTES` (default 5), `PRINTER_NAMES` (comma list overriding the two
 printers), `SF_API_VERSION` (default `v61.0`).
 
 **KV binding** (Settings → Bindings → KV namespace): variable name `CATCHER_KV`. This is

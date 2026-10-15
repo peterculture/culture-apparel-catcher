@@ -3,7 +3,8 @@
  *
  * DUPLICATE BOX: makes `count` (1-100) NEW box records that copy one saved box's
  * Packaging Type, total (Packaging Quantity) and complete size breakdown
- * (Quantity + Size Counted). Each copy gets its own Salesforce record ID and the
+ * (Quantity + Size Counted). Each copy is credited (Counted By) to the catcher who
+ * made the copies. Each copy gets its own Salesforce record ID and the
  * next box number for its Garment Type ("Tees 3" -> "Tees 4", "Tees 5", ...).
  * The original box is only read, never changed.
  *
@@ -54,7 +55,7 @@ export async function onRequestPost({ request, env }) {
       const word = garmentWord(src.name);
       const names = nextNames(order.boxes, word, count);
       const records = names.map((name) => Object.assign({ attributes: { type: "Order_Packaging__c" } },
-        boxFields({ orderId: order.id, name, type: src.type, qty: src.qty, breakdown: src.sizes })));
+        boxFields({ orderId: order.id, name, type: src.type, qty: src.qty, breakdown: src.sizes, countedBy: auth.user.name })));
 
       const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/composite/sobjects`, {
         method: "POST",

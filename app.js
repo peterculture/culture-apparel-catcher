@@ -29,7 +29,12 @@
     pin: "",
     mode: "board",         // "board" (In Production) | "past" (Past Orders)
     past: [], pastLoaded: false, pastError: "", pastSelId: null,
-    del: null              // { boxId, requestId } while the Delete Box dialog is open
+    del: null,             // { boxId, requestId } while the Delete Box dialog is open
+    sessEnd: 0,            // when this sign-in ends, on the tablet's stopwatch (performance.now, not the clock)
+    sessWarned: false,
+    logoutPending: null,   // a logout waiting for a save that's already on its way to Salesforce
+    draft: null,           // an unsaved form kept for the SAME catcher after an automatic sign-out
+    signoutMsg: ""
   };
 
   var $app = document.getElementById("app");
@@ -149,9 +154,93 @@
     label.textContent = kind === "live" ? "Live" : kind === "down" ? "Not connected" : "Connecting";
   }
 
+  /* ---------------------------------------------- 5-minute sign-in ------ */
+  // The SERVER decides when a sign-in ends (it's inside the signed cookie, on the server's clock)
+  // and refuses every save after that. The tablet counts down with performance.now(), a stopwatch
+  // that doesn't change when someone changes the tablet's clock, so it signs out on time too.
+  function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+  function startSession(expiresIn) {
+    var secs = Number(expiresIn);
+    state.sessEnd = nowMs() + (secs > 0 ? secs : 300) * 1000;
+    state.sessWarned = false;
+    tickSession();
+  }
+  function sessionLeft() { return state.sessEnd ? state.sessEnd - nowMs() : 0; }
+  function hasUnsaved() {
+    var o = current(); if (!o) return false;
+    if (state.sheet === "box" && state.box) return boxTotal(o, state.box) > 0;
+    if (state.sheet === "mis" && state.mis) return !!(state.mis.size || state.mis.reason || state.mis.note);
+    if (state.sheet === "dup" && state.dup) return true;
+    return false;
+  }
+  function tickSession() {
+    var el = document.getElementById("who-left");
+    if (!state.user || !state.sessEnd) { if (el) el.textContent = ""; return; }
+    var left = sessionLeft(), secs = Math.max(0, Math.ceil(left / 1000));
+    if (el) { el.textContent = Math.floor(secs / 60) + ":" + ("0" + (secs % 60)).slice(-2); el.className = "who-left" + (secs <= 60 ? " low" : ""); }
+    if (left <= 60000 && !state.sessWarned && left > 0) {
+      state.sessWarned = true;
+      showToast({ kind: "unsure", title: "SIGNING OUT IN 1 MINUTE",
+        body: hasUnsaved() ? "Save the box you're entering now. Anything not saved is kept for you to finish after you sign in again." : "The next catcher will need to enter their PIN." });
+    }
+    if (left <= 0) endSession("timeout");
+  }
+  /** Time's up. A save already on its way to Salesforce finishes first; then sign out. */
+  function endSession(reason) {
+    if (!state.user) return;
+    if (state.saving) { state.logoutPending = state.logoutPending || reason; return; }
+    doLogout(reason);
+  }
+  function afterSave() {
+    if (!state.user) { state.logoutPending = null; return; }
+    if (state.logoutPending && !state.saving) { var why = state.logoutPending; state.logoutPending = null; doLogout(why); }
+  }
+
+  /** End the sign-in for real (server + tablet) and clear everything that belonged to that catcher. */
+  function doLogout(reason) {
+    var who = state.user ? state.user.name : "";
+    var o = current();
+    // An unfinished form is kept ONLY for the same catcher, so their entries aren't lost --
+    // and it's never handed to the next person (it would be credited to the wrong catcher).
+    if (who && o && hasUnsaved() && reason !== "manual") {
+      state.draft = { user: who, sheet: state.sheet, mode: state.mode, orderId: o.id, num: o.num,
+        box: state.box ? JSON.parse(JSON.stringify(state.box)) : null,
+        mis: state.mis ? JSON.parse(JSON.stringify(state.mis)) : null,
+        dup: state.dup ? JSON.parse(JSON.stringify(state.dup)) : null };
+    } else if (reason === "manual") {
+      state.draft = null;
+    }
+    api("POST", "/api/logout");
+    state.user = null; state.sessEnd = 0; state.sessWarned = false; state.logoutPending = null;
+    state.orders = []; state.loaded = false; state.loadError = ""; state.selId = null;
+    state.past = []; state.pastLoaded = false; state.pastError = ""; state.pastSelId = null;
+    state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null;
+    state.pending = null; state.saving = false; state.pin = ""; state.pinErr = ""; state.mode = "board"; state.view = "list";
+    clearTimeout(toastTimer); state.toast = null;
+    state.signoutMsg = reason === "timeout" ? "Signed out after 5 minutes, so every box is credited to the right catcher."
+      : reason === "expired" ? "Your sign-in ended." : "";
+    if (state.draft) state.signoutMsg += " " + state.draft.user + "'s unsaved entries on " + state.draft.num + " are kept and reopen when " + firstName(state.draft.user) + " signs in again.";
+    $overlay.removeAttribute("data-shown");
+    renderAll(); setConn("");
+  }
+
+  /** After sign-in: give a catcher back the form they hadn't saved -- only if it's the same catcher. */
+  function restoreDraft() {
+    var d = state.draft; state.draft = null;
+    if (!d || !state.user || d.user !== state.user.name) return;
+    state.mode = d.mode;
+    var list = d.mode === "past" ? state.past : state.orders;
+    if (!findIn(list, d.orderId)) { showToast({ kind: "err", title: "COULDN'T REOPEN YOUR ENTRIES", body: d.num + " isn't on this list any more. Nothing was saved from before." }); renderMain(); return; }
+    if (d.mode === "past") state.pastSelId = d.orderId; else state.selId = d.orderId;
+    state.box = d.box; state.mis = d.mis; state.dup = d.dup; state.sheet = d.sheet; state.view = "detail";
+    renderMain(); renderOverlay();
+    showToast({ kind: "ok", title: "YOUR ENTRIES ARE BACK", body: "Nothing was saved yet on " + d.num + ". Check them and save." });
+  }
+
   function signedOut() {
-    state.user = null; state.sheet = null; state.saving = false; state.pin = "";
-    renderAll();
+    // The server says this sign-in is over (401). Any save it answered is finished, so sign out now.
+    state.saving = false;
+    if (state.user) doLogout("expired");
   }
 
   /* --------------------------------------------------------------- load -- */
@@ -197,7 +286,7 @@
 
   function loadSetup() {
     return Promise.all([api("GET", "/api/me"), api("GET", "/api/box-types")]).then(function (rs) {
-      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; }
+      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; if (!state.sessEnd) startSession(rs[0].data.expiresIn); }
       if (rs[1].ok) state.boxTypes = rs[1].data.types || [];
     });
   }
@@ -379,6 +468,7 @@
     }).join("");
     return '<div class="pin-wrap"><div class="pin-box">' +
       "<h1>WHO'S CATCHING?</h1><p>Enter your 4-digit PIN</p>" +
+      (state.signoutMsg ? '<div class="pin-note">' + esc(state.signoutMsg) + "</div>" : "") +
       '<div class="dots" id="dots">' + dots + "</div>" +
       '<div class="pin-err" id="pin-err">' + esc(state.pinErr || "") + "</div>" +
       '<div class="pin-pad">' + keys + "</div></div></div>";
@@ -723,20 +813,45 @@
       '<span class="tip">Pinch or double-tap to zoom · drag to move around</span></div></div>';
   }
 
+  /*
+   * Update the screen IN PLACE: walk the elements already on screen next to the
+   * new version and change only what differs (a count, a total, a button label).
+   * The form's scroll panel, the selected size and a focused text box are the same
+   * elements before and after, so nothing jumps and focus isn't lost.
+   * (Rebuilding the whole form on every tap is what used to throw the form back to the top.)
+   */
+  function morph(from, to) {
+    if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) { from.parentNode.replaceChild(to, from); return; }
+    if (from.nodeType === 3 || from.nodeType === 8) { if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue; return; }
+    if (from.nodeType !== 1) return;
+    var i, a;
+    for (i = from.attributes.length - 1; i >= 0; i--) { a = from.attributes[i]; if (!to.hasAttribute(a.name)) from.removeAttribute(a.name); }
+    for (i = 0; i < to.attributes.length; i++) { a = to.attributes[i]; if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value); }
+    if (from.nodeName === "INPUT" || from.nodeName === "TEXTAREA") {
+      var want = to.getAttribute("value") || "";
+      if (document.activeElement !== from && from.value !== want) from.value = want;   // never fight the person typing
+      return;
+    }
+    var fc = Array.prototype.slice.call(from.childNodes), tc = Array.prototype.slice.call(to.childNodes);
+    for (i = 0; i < tc.length; i++) { if (i < fc.length) morph(fc[i], tc[i]); else from.appendChild(tc[i]); }
+    for (i = fc.length - 1; i >= tc.length; i--) from.removeChild(fc[i]);
+  }
+
   function renderOverlay() {
     var o = current();
-    var active = document.activeElement && document.activeElement.id === "mis-note";
-    var caret = active ? document.activeElement.selectionStart : null;
-    if (!state.user || !state.sheet || !o) { $overlay.innerHTML = ""; return; }
-    if (state.sheet === "box") $overlay.innerHTML = boxSheetHtml(o);
-    else if (state.sheet === "mis") $overlay.innerHTML = misSheetHtml(o);
-    else if (state.sheet === "fin") $overlay.innerHTML = finSheetHtml(o);
-    else if (state.sheet === "dup") $overlay.innerHTML = dupSheetHtml(o);
-    else if (state.sheet === "del") $overlay.innerHTML = delSheetHtml(o);
-    else if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); fillMockups($overlay); setupViewer(); }
-    if (active) {
-      var el = document.getElementById("mis-note");
-      if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch (e) {} }
+    if (!state.user || !state.sheet || !o) { $overlay.innerHTML = ""; $overlay.removeAttribute("data-shown"); return; }
+    if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); $overlay.removeAttribute("data-shown"); fillMockups($overlay); setupViewer(); return; }
+    var html = state.sheet === "box" ? boxSheetHtml(o) : state.sheet === "mis" ? misSheetHtml(o) : state.sheet === "fin" ? finSheetHtml(o)
+      : state.sheet === "dup" ? dupSheetHtml(o) : state.sheet === "del" ? delSheetHtml(o) : "";
+    // Which form for which order/box: a different one is drawn fresh; the same one is updated in place.
+    var key = state.sheet + ":" + o.id + ":" + (state.box && state.box.requestId || "") + (state.dup ? ":" + state.dup.requestId : "") + (state.del ? ":" + state.del.requestId : "");
+    var old = $overlay.firstElementChild;
+    if (old && $overlay.getAttribute("data-shown") === key) {
+      var tmp = document.createElement("div"); tmp.innerHTML = html;
+      if (tmp.firstElementChild) morph(old, tmp.firstElementChild);
+    } else {
+      $overlay.innerHTML = html;
+      $overlay.setAttribute("data-shown", key);
     }
   }
 
@@ -758,12 +873,14 @@
   /* ------------------------------------------------------------- saving -- */
   function send(kind, payload, opts) {
     if (state.saving) return;                 // a second tap does nothing
+    if (sessionLeft() <= 0) { endSession("timeout"); return; }   // time's up: no new saves on this sign-in
     opts = opts || {};
     state.saving = true; state.pending = { kind: kind, payload: payload, opts: opts };
     state.toast = null; renderToast(); renderOverlay();
     var path = { box: "/api/boxes", fin: "/api/finish", dup: "/api/duplicate-box", edit: "/api/box-edit", del: "/api/box-delete" }[kind] || "/api/misprints";
     api("POST", path, payload).then(function (r) {
       state.saving = false;
+      if (!state.user) return;
       if (r.ok && kind === "dup" && r.data && r.data.error === "partial") {
         // Some copies exist, some don't: say exactly that, and never retry the whole batch.
         state.pending = null;
@@ -825,7 +942,7 @@
           state.toast.title = r.data.error === "review_expired" ? "REVIEW PERIOD ENDED" : state.toast.title; state.toast.retry = false; renderToast();
         }
       }
-    });
+    }).then(afterSave);
   }
 
   function saveBox(andNew) {
@@ -861,8 +978,14 @@
       api("POST", "/api/login", { pin: state.pin }).then(function (r) {
         state.pinBusy = false;
         if (r.ok) {
-          state.pin = ""; state.pinErr = "";
-          loadSetup().then(function () { renderAll(); loadOrders(); });
+          state.pin = ""; state.pinErr = ""; state.signoutMsg = "";
+          loadSetup().then(function () {
+            startSession(r.data.expiresIn);    // the server's 5 minutes, counted on the tablet's stopwatch
+            renderAll();
+            var d = state.draft;
+            if (d && state.user && d.user !== state.user.name) state.draft = null;   // never hand one catcher's entries to another
+            (d && d.mode === "past" ? Promise.all([loadOrders(), loadPast()]) : loadOrders()).then(restoreDraft);
+          });
         } else {
           state.pin = ""; state.pinErr = (r.data && r.data.message) || "That PIN didn't work.";
           renderMain();
@@ -1071,11 +1194,17 @@
   document.getElementById("zoom-reset").addEventListener("click", function () { state.zoom = 1; saveZoom(1); applyZoom(); });
   document.getElementById("who").addEventListener("click", function () {
     if (state.saving) return;
-    api("POST", "/api/logout").then(signedOut);
+    doLogout("manual");
   });
   window.addEventListener("resize", applyZoom);
   window.addEventListener("beforeunload", function (e) { if (state.saving) { e.preventDefault(); e.returnValue = ""; } });
-  document.addEventListener("visibilitychange", function () { if (!document.hidden && !state.sheet && !state.saving) { if (state.mode === "past") loadPast(true); else loadOrders(true); } });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden || !state.user) return;
+    // Back from sleep: the tablet's stopwatch may have paused, so ask the server how long is really left.
+    api("GET", "/api/me").then(function (r) { if (r.ok && state.user) { var w = state.sessWarned; startSession(r.data.expiresIn); state.sessWarned = w && sessionLeft() <= 60000; } });
+    if (!state.sheet && !state.saving) { if (state.mode === "past") loadPast(true); else loadOrders(true); }
+  });
+  setInterval(tickSession, 1000);
 
   function tickClock() {
     document.getElementById("clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });

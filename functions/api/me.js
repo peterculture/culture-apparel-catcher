@@ -6,5 +6,6 @@ import { REASONS } from "./misprints.js";
 export async function onRequestGet({ request, env }) {
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
-  return json({ name: auth.user.name, reasons: REASONS });
+  // expiresIn: seconds left in this sign-in, by the server's clock (the tablet counts down from it).
+  return json({ name: auth.user.name, reasons: REASONS, expiresIn: auth.user.expiresIn });
 }

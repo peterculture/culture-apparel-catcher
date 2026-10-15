@@ -64,7 +64,7 @@ export async function onRequestPost({ request, env }) {
     const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/Order_Packaging__c`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(boxFields({ orderId: order.id, name: boxName, type, qty, breakdown })),
+      body: JSON.stringify(boxFields({ orderId: order.id, name: boxName, type, qty, breakdown, countedBy: auth.user.name })),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status !== 201 || !data || !data.id || data.success === false) {

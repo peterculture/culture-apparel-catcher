@@ -283,3 +283,12 @@ img[data-mock].ready + .mock-wait { display: none; }
 .sheet-title h2.danger { color: var(--danger-text); }
 .save.danger { background: #8E241B; }
 .save.danger.busy:disabled { background: #8E241B; color: #fff; }
+
+/* ---------- 5-minute sign-in ---------- */
+.who-left { font: 600 14px/1 'Oswald'; letter-spacing: .06em; color: var(--text-muted); padding: 6px 8px; border-radius: 8px; background: #1a1a1f; min-width: 44px; text-align: center; }
+.who-left:empty { display: none; }
+.who-left.low { color: #1a1205; background: var(--warn); }
+.pin-note { margin: .2rem auto 0; max-width: 26rem; padding: .8rem 1rem; border-radius: .8rem; background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn-soft); font: 500 .95rem/1.4 'Archivo'; text-align: center; }
+/* The number pad stays in view while the catcher scrolls down to the lower sizes,
+   so typing a count never needs a scroll back up. */
+.pad-wrap { position: sticky; top: 0; align-self: flex-start; z-index: 1; background: var(--surface-panel); padding-bottom: .4rem; }

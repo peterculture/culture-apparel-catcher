@@ -9,16 +9,26 @@
  *   Packaging_Type__c         "Packaging Type"
  *   Packaging_Quantity__c     the box's total garments (number)
  *   Quantity_Size_Counted__c  "Quantity + Size Counted", e.g. "S 8 · M 15 = 23" (blank if unknown)
+ *   CountedBy__c             "Counted By": the signed-in catcher (see below)
  */
 import { SIZE_FIELD, buildBreakdown } from "./_sizes.js";
 
-export function boxFields({ orderId, name, type, qty, breakdown }) {
+/**
+ * "Counted By" (CountedBy__c, Text 80, added 2026-10-15): the signed-in catcher who
+ * logged the box. Every box is saved through the app's one Salesforce login, so
+ * Salesforce's own Created By always says "Catcher App" -- this field is what says
+ * WHO it was. Set when a box is created (log, Save & New, duplicate); an edit keeps it.
+ */
+export const COUNTED_BY_FIELD = "CountedBy__c";
+
+export function boxFields({ orderId, name, type, qty, breakdown, countedBy }) {
   return {
     Name: String(name).slice(0, 80),
     Order__c: orderId,
     Packaging_Type__c: type,
     Packaging_Quantity__c: qty,
     ...(breakdown ? { [SIZE_FIELD]: breakdown } : {}),
+    ...(countedBy ? { [COUNTED_BY_FIELD]: String(countedBy).slice(0, 80) } : {}),
   };
 }
 

@@ -21,6 +21,7 @@
  */
 import { runQuery, soqlQuote, plainText, SfError, SF_ID } from "./_sf.js";
 import { SIZE_FIELD, parseBreakdown } from "./_sizes.js";
+import { COUNTED_BY_FIELD } from "./_boxes.js";
 
 export const DEFAULT_PRINTERS = ["Culture Apparel", "Culture Apparel Press 2"];
 
@@ -131,7 +132,7 @@ async function buildOrders(env, orders) {
   const ids = orders.map((o) => soqlQuote(o.Id)).join(",");
   const [items, boxes] = await Promise.all([
     runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name FROM OrderItem WHERE OrderId IN (${ids})`),
-    runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, CreatedDate, LastModifiedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
+    runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, ${COUNTED_BY_FIELD}, CreatedDate, LastModifiedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
   ]);
 
   const now = Date.now();
@@ -159,7 +160,8 @@ async function buildOrders(env, orders) {
     const orderBoxes = boxes.filter((b) => b.Order__c === o.Id).map((b) => ({
       id: b.Id, name: b.Name, type: b.Packaging_Type__c || "", qty: Number(b.Packaging_Quantity__c) || 0,
       sizes: b[SIZE_FIELD] || "", counts: parseBreakdown(lines, b[SIZE_FIELD]),
-      at: b.CreatedDate, by: (b.CreatedBy && b.CreatedBy.Name) || "",
+      // Who counted it: Counted By when set; older boxes only have Salesforce's Created By.
+      at: b.CreatedDate, by: b[COUNTED_BY_FIELD] || (b.CreatedBy && b.CreatedBy.Name) || "", countedBy: b[COUNTED_BY_FIELD] || "",
       lastModified: b.LastModifiedDate || b.CreatedDate,
       // 7-day review window, worked out on the server's clock from Salesforce's own CreatedDate.
       editableUntil: reviewDeadline(b.CreatedDate) ? new Date(reviewDeadline(b.CreatedDate)).toISOString() : null,

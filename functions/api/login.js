@@ -26,13 +26,13 @@ export async function onRequestPost({ request, env }) {
       return json({ error: "wrong_pin", message: "That PIN didn't match. Try again." }, 401);
     }
     await clearPinFails(request, env);
-    let cookie;
+    let issued;
     try {
-      cookie = await issueCookie(env, name);
+      issued = await issueCookie(env, name);
     } catch (err) {
       return json({ error: "setup", message: "Sign-in isn't set up correctly. Tell a manager." }, 500);
     }
-    return json({ ok: true, name }, 200, { "Set-Cookie": cookie });
+    return json({ ok: true, name, expiresIn: issued.expiresIn }, 200, { "Set-Cookie": issued.cookie });
   } catch (err) {
     console.error(err);
     return json({ error: "internal_error", message: "Something went wrong. Try again." }, 500);
