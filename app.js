@@ -20,7 +20,7 @@
     selId: null,
     view: "list",          // narrow screens show list OR detail
     zoom: readZoom(),
-    sheet: null,           // "box" | "mis" | "mock"
+    sheet: null,           // "box" | "mis" | "mock" | "fin"
     box: null,             // { line, type, qty }
     mis: null,             // { line, size, qty, reason, note }
     saving: false,
@@ -349,11 +349,13 @@
     var cards = state.orders.map(function (o) {
       var sel = o.id === state.selId;
       var thumb = o.hasMockup ? '<img class="thumb-img" alt="" data-mock="' + esc(o.id) + ':0"><span class="mock-wait">' + ICON.shirt + "</span>" : ICON.shirt;
-      return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" aria-pressed="' + sel + '">' +
+      var tag = !o.inProduction ? '<span class="tag moved">MOVED ON · FINISH COUNT</span>'
+        : o.finished ? '<span class="tag done">✓ COUNTED · ' + o.finishedCount + (o.finishedCount === 1 ? " BOX" : " BOXES") + "</span>" : "";
+      return '<button class="card' + (o.inProduction ? "" : " moved") + '" data-act="pick" data-id="' + esc(o.id) + '" aria-pressed="' + sel + '">' +
         '<span class="thumb">' + thumb + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
         '<span class="card-cust">' + esc(o.customer) + "</span>" +
-        '<span class="card-meta">' + o.total + " garments · " + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + "</span></span></button>";
+        '<span class="card-meta">' + o.total + " garments · " + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + "</span>" + tag + "</span></button>";
     }).join("");
     var body;
     if (!state.loaded && state.loadError) {
@@ -390,8 +392,10 @@
         '</span><span class="log-who">' + esc(b.by) + (b.at ? " · " + fmtTime(b.at) : "") + "</span></div>";
     }).join("");
     var misLog = o.misprintNotes ? '<div class="sec-label" style="margin-top:.6rem">MISPRINT NOTES IN SALESFORCE</div><div class="notes">' + esc(o.misprintNotes.split(" | ").join("\n")) + "</div>" : "";
+    var banner = o.inProduction ? "" : '<div class="moved-banner">' + ICON.warn +
+      "<div><b>MOVED TO " + esc(String(o.status || "Post-Production").toUpperCase()) + "</b>The print crew moved this order on. Finish logging its boxes, then tap FINISH CATCHING. It stays on your board until you do.</div></div>";
     return '<main class="detail">' +
-      '<button class="back narrow-only" data-act="back">' + ICON.back + "ALL ORDERS</button>" +
+      '<button class="back narrow-only" data-act="back">' + ICON.back + "ALL ORDERS</button>" + banner +
       '<div class="d-top">' + mock + '<div class="d-id"><h2 class="d-num">' + esc(o.num) + "</h2>" +
       '<div class="d-cust">' + esc(o.customer) + "</div>" +
       '<div class="d-meta">Print date ' + esc(fmtDate(o.printDate)) + (o.specs ? " · " + esc(o.specs) : "") + "</div></div></div>" +
@@ -401,9 +405,31 @@
       '<div class="stat"><div class="l">MISPRINTS</div><div class="v' + (o.misprintTotal ? " warn" : "") + '">' + o.misprintTotal + "</div></div></div>" +
       '<div class="actions"><button class="big big-red" data-act="open-box">' + ICON.box + "LOG BOXES</button>" +
       '<button class="big big-warn" data-act="open-mis">' + ICON.warn + "REPORT MISPRINT</button></div>" +
+      finishBtn(o) +
       '<div class="log"><div class="sec-label">BOXES ON THIS ORDER</div>' +
       (log || '<div class="empty" style="margin:0">No boxes logged yet.</div>') + misLog + "</div>" +
       "</main>";
+  }
+
+  function finishBtn(o) {
+    var n = o.boxes.length;
+    if (!n) return '<button class="big big-done" disabled>' + ICON.check + "FINISH CATCHING · LOG A BOX FIRST</button>";
+    if (o.finished && o.finishedCount === n) return '<button class="big big-done" data-act="open-fin">' + ICON.check + "COUNTED · " + n + (n === 1 ? " BOX" : " BOXES") + "</button>";
+    return '<button class="big big-done go" data-act="open-fin">' + ICON.check + (o.finished ? "UPDATE COUNT · " : "FINISH CATCHING · ") + n + (n === 1 ? " BOX" : " BOXES") + "</button>";
+  }
+
+  function finSheetHtml(o) {
+    var n = o.boxes.length, boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
+    var short = boxed !== o.total;
+    return '<div class="scrim"><div class="sheet" role="dialog" aria-label="Finish catching">' +
+      '<div class="sheet-head"><div class="sheet-title"><h2>FINISH CATCHING · ' + esc(o.num) + "</h2>" +
+      "<p>Saves " + n + " as this order's box count in Salesforce" + (o.inProduction ? "." : ", then it leaves your board.") + "</p></div>" +
+      '<button class="x" data-act="close" aria-label="Close">' + ICON.x + "</button></div>" +
+      '<div class="fin-sum"><div class="stat"><div class="l">BOXES</div><div class="v">' + n + '</div></div>' +
+      '<div class="stat"><div class="l">GARMENTS BOXED</div><div class="v' + (short ? " warn" : "") + '">' + boxed + " <small>/ " + o.total + "</small></div></div></div>" +
+      (short ? '<div class="fin-warn">The boxes hold ' + boxed + " garments but the order has " + o.total + ". If that's right (misprints, extras), finish anyway. If not, close this and log the missing box.</div>" : "") +
+      '<button class="save ok' + (state.saving ? " busy" : "") + '" data-act="save-fin"' + (state.saving ? " disabled" : "") + ">" +
+      (state.saving ? '<span class="spin"></span>SAVING TO SALESFORCE…' : "YES, I'M DONE · " + n + (n === 1 ? " BOX" : " BOXES")) + "</button></div></div>";
   }
 
   /* ----------------------------------------------------------- sheets ---- */
@@ -494,6 +520,7 @@
     if (!state.user || !state.sheet || !o) { $overlay.innerHTML = ""; return; }
     if (state.sheet === "box") $overlay.innerHTML = boxSheetHtml(o);
     else if (state.sheet === "mis") $overlay.innerHTML = misSheetHtml(o);
+    else if (state.sheet === "fin") $overlay.innerHTML = finSheetHtml(o);
     else if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); fillMockups($overlay); setupViewer(); }
     if (active) {
       var el = document.getElementById("mis-note");
@@ -521,7 +548,7 @@
     if (state.saving) return;                 // a second tap does nothing
     state.saving = true; state.pending = { kind: kind, payload: payload };
     state.toast = null; renderToast(); renderOverlay();
-    var path = kind === "box" ? "/api/boxes" : "/api/misprints";
+    var path = kind === "box" ? "/api/boxes" : kind === "fin" ? "/api/finish" : "/api/misprints";
     api("POST", path, payload).then(function (r) {
       state.saving = false;
       if (r.ok) {
@@ -530,12 +557,19 @@
         if (kind === "box" && o && r.data.box) {
           o.boxes.push(r.data.box);
           showToast({ kind: "ok", title: "BOX SAVED", body: "“" + r.data.box.name + "” · " + r.data.box.qty + " garments · " + r.data.box.type + " is in Salesforce on " + o.num + "." });
+        } else if (kind === "fin" && o) {
+          o.finished = true; o.finishedCount = r.data.boxCount;
+          showToast({ kind: "ok", title: "ORDER FINISHED", body: o.num + ": " + r.data.boxCount + (r.data.boxCount === 1 ? " box" : " boxes") + " saved as the box count in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
+          if (!o.inProduction) {
+            state.orders = state.orders.filter(function (x) { return x.id !== o.id; });
+            state.selId = state.orders.length ? state.orders[0].id : null; state.view = "list";
+          }
         } else if (kind === "mis" && o && r.data.misprint) {
           o.misprintTotal = r.data.misprintTotal;
           var mp = r.data.misprint;
           showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + ". The print shop has been notified." });
         }
-        state.sheet = null; state.box = null; state.mis = null;
+        state.sheet = null; state.box = null; state.mis = null; state.fin = null;
         renderOverlay(); renderMain();
         loadOrders(true);                      // pull the real numbers back from Salesforce
       } else if (r.status === 0 || (r.data && r.data.error === "unconfirmed") || (r.data && r.data.error === "in_progress")) {
@@ -683,6 +717,12 @@
     },
     "box-last": function () { var o = current(); state.box.qty = String(o.boxes[o.boxes.length - 1].qty); renderOverlay(); },
     "save-box": saveBox,
+    "open-fin": function () {
+      var o = current(); if (!o || !o.boxes.length) return;
+      state.fin = { requestId: newRequestId() };
+      state.sheet = "fin"; state.toast = null; renderToast(); renderOverlay();
+    },
+    "save-fin": function () { var o = current(); if (o && state.fin) send("fin", { orderId: o.id, requestId: state.fin.requestId }); },
     "mis-line": function (el) { state.mis.line = Number(el.getAttribute("data-i")); state.mis.size = null; renderOverlay(); },
     "mis-size": function (el) { state.mis.size = el.getAttribute("data-v"); renderOverlay(); },
     "mis-reason": function (el) { state.mis.reason = el.getAttribute("data-v"); renderOverlay(); },

@@ -9,8 +9,17 @@
  *
  * Optional variable PRINTER_NAMES (comma separated) overrides the printer list
  * if a press is added or renamed, without a code change.
+ *
+ * STAYING ON THE BOARD UNTIL COUNTED (Anthony, 2026-10-15):
+ * the print crew sometimes moves an order to Post-Production before the catcher
+ * has finished logging boxes. So once an order has been on the board, it STAYS
+ * on the board -- whatever its Production Status -- until a catcher taps
+ * FINISH CATCHING, which writes the box count to Order.Packaging_Count__c.
+ *   - "Has been on the board" is remembered in KV (key board:seen), for 14 days.
+ *   - Finished = Packaging_Count__c is filled in.
+ * The crew is never blocked; nothing about their process changes.
  */
-import { runQuery, soqlQuote, plainText, SfError } from "./_sf.js";
+import { runQuery, soqlQuote, plainText, SfError, SF_ID } from "./_sf.js";
 
 export const DEFAULT_PRINTERS = ["Culture Apparel", "Culture Apparel Press 2"];
 
@@ -29,7 +38,33 @@ const ORDER_FIELDS = [
   "Id", "OrderNumber", "GOA_Order_Number__c", "Account.Name",
   "Print_Date__c", "Printer__r.Name", "Specifications_for_Printing__c",
   "TotalQtyMisprints__c", "Misprint_Details__c", "Artwork_URL__c", "LastModifiedDate",
+  "Order_Substatus__c", "Packaging_Count__c",
 ];
+
+const SEEN_KEY = "board:seen";
+const SEEN_MS = 14 * 86400000;
+
+/** orderId -> first time it was on the board (ms). Empty without KV. */
+async function readSeen(env) {
+  if (!env.CATCHER_KV) return {};
+  try {
+    const v = JSON.parse((await env.CATCHER_KV.get(SEEN_KEY)) || "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch (_) { return {}; }
+}
+
+/** After a full list load: remember what is In Production now; forget what has left the board. */
+async function writeSeen(env, seen, orders) {
+  if (!env.CATCHER_KV) return;
+  const now = Date.now();
+  const next = {};
+  for (const o of orders) {
+    if (o.inProduction || !o.finished) next[o.id] = seen[o.id] || now;
+  }
+  const a = JSON.stringify(Object.keys(next).sort()), b = JSON.stringify(Object.keys(seen).sort());
+  if (a === b) return;
+  try { await env.CATCHER_KV.put(SEEN_KEY, JSON.stringify(next)); } catch (err) { console.error("board:seen write failed", err && err.message); }
+}
 
 const SIZE_ORDER = ["YXS", "YS", "YM", "YL", "YXL", "XXS", "XS", "S", "M", "L", "XL", "2XL", "XXL", "3XL", "XXXL", "4XL", "5XL", "6XL", "OSFA", "OS"];
 function sizeRank(s) {
@@ -39,10 +74,15 @@ function sizeRank(s) {
 
 /** The orders the app may show — and therefore the only orders it may write to. */
 export async function loadOrders(env, { orderId } = {}) {
-  const where = inProductionWhere(env) + (orderId ? ` AND Id = ${soqlQuote(orderId)}` : "");
+  const seen = await readSeen(env);
+  const cutoff = Date.now() - SEEN_MS;
+  const carry = Object.keys(seen).filter((id) => SF_ID.test(id) && Number(seen[id]) > cutoff).slice(0, 150);
+  let where = `(${inProductionWhere(env)})`;
+  if (carry.length) where = `(${where} OR (Id IN (${carry.map(soqlQuote).join(",")}) AND Packaging_Count__c = null))`;
+  if (orderId) where += ` AND Id = ${soqlQuote(orderId)}`;
   const orders = await runQuery(env,
     `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${where} ORDER BY Print_Date__c ASC, OrderNumber ASC LIMIT 200`);
-  if (!orders.length) return [];
+  if (!orders.length) { if (!orderId) await writeSeen(env, seen, []); return []; }
 
   const ids = orders.map((o) => soqlQuote(o.Id)).join(",");
   const [items, boxes] = await Promise.all([
@@ -50,7 +90,7 @@ export async function loadOrders(env, { orderId } = {}) {
     runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, CreatedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
   ]);
 
-  return orders.map((o) => {
+  const result = orders.map((o) => {
     // Garment lines: one per product + colour, sizes sorted S..XL. Rows with no
     // size are not garments (setup fees, screens) and are left out.
     const groups = new Map();
@@ -85,11 +125,19 @@ export async function loadOrders(env, { orderId } = {}) {
       misprintDetails: o.Misprint_Details__c || "",
       artworkUrl: o.Artwork_URL__c || null,
       lastModified: o.LastModifiedDate,
+      // Still In Production? If not, the crew moved it on before the catcher finished.
+      inProduction: o.Order_Substatus__c === "Production",
+      status: o.Order_Substatus__c || "",
+      finished: o.Packaging_Count__c != null,
+      finishedCount: o.Packaging_Count__c != null ? Number(o.Packaging_Count__c) : null,
       lines,
       total: lines.reduce((a, l) => a + l.total, 0),
       boxes: orderBoxes,
     };
   });
+  if (!orderId) await writeSeen(env, seen, result);
+  // Orders the crew already moved on come first: they're the ones waiting on the catcher.
+  return result.sort((a, b) => Number(a.inProduction) - Number(b.inProduction));
 }
 
 /** One order, or an error a catcher can understand. Used before every save. */
@@ -97,7 +145,7 @@ export async function loadOneOrder(env, orderId) {
   const [order] = await loadOrders(env, { orderId });
   if (!order) {
     throw new SfError("order_not_in_production", 409,
-      "This order is no longer In Production for screen print, so nothing was saved. Refresh the list.");
+      "This order is no longer on the catching board (it was finished, or isn't In Production), so nothing was saved. Refresh the list.");
   }
   return order;
 }

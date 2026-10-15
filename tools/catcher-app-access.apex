@@ -5,7 +5,7 @@
 // and shows the error. Safe to run again: it updates what already exists.
 //
 // What it grants (and nothing else):
-//   Order            Read + View All. Edit ONLY TotalQtyMisprints__c and Misprint_Details__c.
+//   Order            Read + View All. Edit ONLY TotalQtyMisprints__c, Misprint_Details__c and Packaging_Count__c.
 //   Order Product    Read Size__c and Color__c (Order Products follow the Order's access).
 //   Order Packaging  Read + Create + View All. No edit or delete of existing boxes.
 //   Account, Product, Price Book, the Printer's object   Read only.
@@ -73,6 +73,7 @@ Map<String, Boolean> fields = new Map<String, Boolean>{
     'Order.GOA_Order_Number__c' => false, 'Order.Order_Substatus__c' => false, 'Order.Printer__c' => false,
     'Order.Print_Date__c' => false, 'Order.Specifications_for_Printing__c' => false, 'Order.Artwork_URL__c' => false,
     'Order.TotalQtyMisprints__c' => true, 'Order.Misprint_Details__c' => true,
+    'Order.Packaging_Count__c' => true,
     'OrderItem.Size__c' => false, 'OrderItem.Color__c' => false,
     'Order_Packaging__c.Order__c' => true, 'Order_Packaging__c.Packaging_Type__c' => true,
     'Order_Packaging__c.Packaging_Quantity__c' => true

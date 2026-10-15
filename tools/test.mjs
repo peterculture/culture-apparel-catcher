@@ -20,6 +20,7 @@ const boxes = await mod("boxes");
 const mis = await mod("misprints");
 const me = await mod("me");
 const mockup = await mod("mockup");
+const finish = await mod("finish");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -81,9 +82,10 @@ globalThis.fetch = async (url, init = {}) => {
     if (/FROM Order WHERE/.test(q)) {
       if (behave.queryFail) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column" }]);
       const idm = q.match(/AND Id = '([^']+)'/);
-      let recs = db.orders.filter((o) => o._inProd);
+      const carry = /Packaging_Count__c = null/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : "";
+      let recs = db.orders.filter((o) => o._inProd || (carry.includes(o.Id) && o.Packaging_Count__c == null));
       if (idm) recs = recs.filter((o) => o.Id === idm[1]);
-      return res(200, { done: true, records: recs.map((o) => { const { _inProd, ...r } = o; return r; }) });
+      return res(200, { done: true, records: recs.map((o) => { const { _inProd, ...r } = o; return Object.assign({ Order_Substatus__c: _inProd ? "Production" : "Post-Production", Packaging_Count__c: null }, r); }) });
     }
     if (/FROM OrderItem/.test(q)) return res(200, { done: true, records: db.items.filter((i) => q.includes(i.OrderId)) });
     if (/FROM Order_Packaging__c/.test(q)) return res(200, { done: true, records: db.boxes.filter((b) => q.includes(b.Order__c)) });
@@ -363,6 +365,36 @@ await test("Mockup: pictures in the order's Files list come first, newest first;
   r = await get(2);
   ok(r.status === 404, "n past the end -> 404");
   ok(!calls.some((c) => c.url.includes("file.force.com")), "Artwork URL not used when files exist");
+});
+
+await test("Moved to Post-Production early: stays on the board until FINISH CATCHING", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const list = async () => (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders;
+  let l = await list();
+  ok(l.length === 2 && l.every((o) => o.inProduction && !o.finished), "both In Production, not finished");
+  db.orders[0]._inProd = false;                 // the crew moves 21379-1 to Post-Production
+  l = await list();
+  ok(l.length === 2, "the moved order is still on the board");
+  ok(l[0].id === "801000000000001AAA" && l[0].inProduction === false, "moved order listed first, marked as moved on");
+  const r1 = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", qty: 26, name: "Tees 2", requestId: "req-fin00001" }, cookie), env });
+  ok(r1.status === 201, "catcher can still log a box on the moved order");
+  let r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000002AAA", requestId: "req-fin00002" }, cookie), env });
+  ok(r.status === 400, "can't finish an order with no boxes");
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000001AAA", requestId: "req-fin00003" }, cookie), env });
+  const d = await r.json();
+  ok(r.status === 200 && d.boxCount === 2, "finish -> 200, 2 boxes");
+  ok(db.orders[0].Packaging_Count__c === 2, "Packaging_Count__c = 2 written to the Order");
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000001AAA", requestId: "req-fin00003" }, cookie), env });
+  ok(r.status === 200 && posts("/sobjects/Order/801000000000001AAA").length === 1, "double tap: same answer, written once");
+  l = await list();
+  ok(l.length === 1 && l[0].id === "801000000000002AAA", "finished + moved on -> off the board");
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", qty: 5, name: "Tees 3", requestId: "req-fin00004" }, cookie), env });
+  ok(r.status === 409, "no more saves once it's off the board");
+  // An order that leaves In Production WITHOUT ever having been on the board is not pulled back.
+  reset(); const env2 = ENV(); const c2 = await signIn(env2);
+  db.orders[0]._inProd = false;
+  const l2 = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, c2), env: env2 })).json()).orders;
+  ok(l2.length === 1, "never-seen Post-Production order is not shown");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

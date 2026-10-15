@@ -206,3 +206,20 @@ img[data-mock].ready + .mock-wait { display: none; }
 .thumb .mock-wait { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: .55; }
 .mock-wait.mock-none { animation: mockPulse 1.4s ease-in-out infinite; }
 @keyframes mockPulse { 50% { opacity: .45; } }
+
+/* ---------- finishing: orders the crew moved on before the catcher was done ---------- */
+.card.moved { border-color: var(--warn); background: var(--warn-bg); }
+.card.moved[aria-pressed="true"] { border-color: var(--warn-soft); box-shadow: 0 0 0 2px var(--warn) inset; }
+.tag { align-self: flex-start; padding: .3rem .55rem; border-radius: .45rem; font: 600 .72rem/1 'Oswald'; letter-spacing: .1em; }
+.tag.moved { background: var(--warn); color: #1a1205; }
+.tag.done { background: var(--ok-bg); color: var(--ok-text); border: 1px solid var(--ok-strong); }
+.moved-banner { display: flex; gap: .9rem; align-items: center; padding: 1rem 1.2rem; border-radius: 1rem; background: var(--warn-bg); border: 2px solid var(--warn); color: var(--warn-soft); font: 500 1.05rem/1.4 'Archivo'; }
+.moved-banner b { display: block; font: 700 1.15rem/1.2 'Oswald'; letter-spacing: .06em; color: #F2D29A; margin-bottom: .2rem; }
+.big-done { width: 100%; min-height: 5.5rem; border: 2px solid var(--ok-strong); background: var(--ok-bg); color: var(--ok-text); }
+.big-done.go { background: var(--ok-strong); color: #fff; border-color: var(--ok); }
+.big-done:disabled { opacity: .45; }
+.fin-sum { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
+.fin-sum .stat .v { font-size: 2.6rem; }
+.fin-warn { padding: .9rem 1.1rem; border-radius: .9rem; background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn-soft); font: 500 1rem/1.4 'Archivo'; }
+.save.ok { background: var(--ok-strong); }
+.save.ok.busy:disabled { background: var(--ok-strong); color: #fff; }

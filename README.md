@@ -14,6 +14,11 @@ Pages project, its own Salesforce connection and its own PIN list.
 - **Log Boxes:** one `Order_Packaging__c` record per box (Name such as "Tees 2", Order,
   Packaging Type, garments in the box). This is the same record the "Enter Packaging"
   flow creates. Box count = number of records.
+- **Stays on the board until counted:** once an order has been on the board, it stays
+  there even if the print crew moves it to Post-Production early. It's marked
+  "MOVED ON · FINISH COUNT" and listed first, until a catcher taps **FINISH CATCHING**.
+  That writes the number of boxes to `Order.Packaging_Count__c` and the order leaves the
+  board. (The board remembers which orders it has shown in KV, key `board:seen`, for 14 days.)
 - **Report Misprint:** on the Order it adds to `TotalQtyMisprints__c` and adds one line to
   `Misprint_Details__c` under the "TOTAL QTY: NN" heading. The heading keeps the
   Total Quantity Misprints formula and the misprint-rate reports correct. Changing
@@ -59,6 +64,7 @@ functions/api/                  the server (Cloudflare Pages Functions)
   box-types.js                  GET  active Packaging Type values
   boxes.js                      POST log one box
   misprints.js                  POST record a misprint
+  finish.js                     POST finish catching (box count -> Packaging_Count__c)
   mockup.js                     GET  one order's mockup picture
 tools/test.mjs                  offline tests against a pretend Salesforce
 ```
@@ -90,7 +96,7 @@ but without those two protections.
 2. **Connected app** with OAuth "Client Credentials Flow" enabled, run as that user.
    Copy its Consumer Key and Consumer Secret into Cloudflare.
 3. **Access the integration user needs:**
-   - Order: Read, and Edit on `TotalQtyMisprints__c` and `Misprint_Details__c`.
+   - Order: Read, and Edit on `TotalQtyMisprints__c`, `Misprint_Details__c` and `Packaging_Count__c`.
      Read on the fields the list uses: `GOA_Order_Number__c`, `Order_Substatus__c`,
      `Printer__c`, `Print_Date__c`, `Specifications_for_Printing__c`, `Artwork_URL__c`.
    - Order Product (OrderItem): Read on `Size__c`, `Color__c`, Quantity, and the Product name.
