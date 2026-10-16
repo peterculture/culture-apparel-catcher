@@ -466,7 +466,7 @@
       var aria = k === "<" ? "Delete last digit" : k === "C" ? "Clear" : k;
       return '<button data-act="pin" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '" aria-label="' + aria + '">' + label + "</button>";
     }).join("");
-    return '<div class="pin-wrap"><div class="pin-box">' +
+    return '<div class="pin-wrap ca-season-pin"><div class="pin-box">' + seasonChip(false) +
       "<h1>WHO'S CATCHING?</h1><p>Enter your 4-digit PIN</p>" +
       (state.signoutMsg ? '<div class="pin-note">' + esc(state.signoutMsg) + "</div>" : "") +
       '<div class="dots" id="dots">' + dots + "</div>" +
@@ -496,8 +496,8 @@
     else if (!state.past.length) body = '<div class="empty"><strong>NO BOXES IN THE LAST 30 DAYS</strong>Screen-print orders show here once boxes are logged on them.</div>';
     else body = (state.pastError ? '<div class="empty" style="margin-bottom:0"><strong>MAY BE OUT OF DATE</strong>' + esc(state.pastError) + "</div>" : "") + '<div class="cards">' + cards + "</div>";
     return '<section class="list" aria-label="Past orders">' + modeTabs() +
-      '<div class="list-head"><div class="list-title"><h1>PAST ORDERS</h1><span class="list-count">' + state.past.length + "</span></div>" +
-      '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div></div>' + body + "</section>";
+      '<div class="list-head ca-season-head"><div class="list-title"><h1>PAST ORDERS</h1><span class="list-count">' + state.past.length + "</span></div>" +
+      '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div>' + seasonChip(true) + "</div>" + body + "</section>";
   }
 
   function listHtml() {
@@ -526,8 +526,18 @@
         '<div class="cards">' + cards + "</div>";
     }
     return '<section class="list" aria-label="Orders in production">' + modeTabs() +
-      '<div class="list-head"><div class="list-title"><h1>IN PRODUCTION</h1><span class="list-count">' + state.orders.length + "</span></div>" +
-      '<div class="list-sub"><i></i>SCREEN PRINT ONLY</div></div>' + body + "</section>";
+      '<div class="list-head ca-season-head"><div class="list-title"><h1>IN PRODUCTION</h1><span class="list-count">' + state.orders.length + "</span></div>" +
+      '<div class="list-sub"><i></i>SCREEN PRINT ONLY</div>' + seasonChip(true) + "</div>" + body + "</section>";
+  }
+
+  /* Seasonal / holiday theme -- the production dashboard's own seasonal.js + photos
+     (seasons/), shared unchanged so both apps always show the same theme. The words
+     come from CSS (content: var(--ca-season-*)), so nothing here depends on the
+     script: if it or the photo is missing, these stay hidden and nothing else changes. */
+  function seasonChip(withFx) {
+    return '<div class="season-chip"><span class="ca-season-dot"></span><span class="ca-season-name"></span>' +
+      '<span class="season-sep">·</span><span class="ca-season-range"></span>' +
+      (withFx ? '<button type="button" data-ca-fx-toggle="" class="ca-season-fxbtn season-fx" title="Turn the seasonal animation on or off on this tablet"></button>' : "") + "</div>";
   }
 
   function detailHtml() {

@@ -74,6 +74,30 @@ Pages project, its own Salesforce connection and its own PIN list.
 - – / + in the header makes the whole screen smaller or bigger (85%–175%). At larger
   sizes the screen switches to one column.
 
+## Seasonal / holiday look (same as the production dashboard)
+
+`seasonal.js` and the photos in `seasons/` are copied **unchanged** from the production
+dashboard (`culture-apparel-production-main`). Both apps therefore always show the same theme:
+
+- the season (Spring, Summer, Fall, Winter);
+- or, during a holiday's Sunday–Saturday week, that holiday (New Year's, Valentine's,
+  St. Patrick's, Easter, 4th of July, Halloween, Thanksgiving, Christmas).
+
+When the dashboard's photos or `seasonal.js` change, copy them here again.
+
+**Where the theme shows:**
+- the photo strip behind "QUALITY MERCH. REAL IMPACT." in the header;
+- the order list's title banner, with the season chip and the **Effects on/off** switch
+  (saved per tablet);
+- the PIN screen backdrop;
+- a light falling animation (leaves, snow, bats…) that never blocks a tap and sits under
+  the header and every form.
+
+**Previewing a theme:** add `?theme=halloween` (or `christmas`, `july4`, `winter`…) to the URL.
+
+**If anything fails, the app looks as before.** Nothing appears until the photo has
+loaded. The animation is off for tablets set to reduce motion.
+
 ## Safety rules built in
 
 - Nothing shows as saved until Salesforce confirms it.
@@ -99,6 +123,7 @@ Pages project, its own Salesforce connection and its own PIN list.
 
 ```
 index.html, app.css, app.js     the tablet screen (no build step)
+seasonal.js, seasons/           seasonal / holiday theme, copied from the production dashboard
 vendor/                         pdf.js, which draws PDF / Illustrator mockups
 _headers                        security headers
 functions/api/                  the server (Cloudflare Pages Functions)

@@ -7,3 +7,6 @@
 
 /api/*
   Cache-Control: no-store
+
+/seasons/*
+  Cache-Control: public, max-age=604800

@@ -292,3 +292,50 @@ img[data-mock].ready + .mock-wait { display: none; }
 /* The number pad stays in view while the catcher scrolls down to the lower sizes,
    so typing a count never needs a scroll back up. */
 .pad-wrap { position: sticky; top: 0; align-self: flex-start; z-index: 1; background: var(--surface-panel); padding-bottom: .4rem; }
+
+/* ---------------------------------------------------------------------------
+ * Seasonal / holiday theme -- the production dashboard's look (tokens.css),
+ * driven by the dashboard's own seasonal.js + photos in seasons/.
+ * seasonal.js sets --ca-season-* on <html> and adds [data-ca-season] only once
+ * the photo has LOADED, so if the script or photo is missing nothing below
+ * applies and the app looks exactly as it did. The words come from CSS content:,
+ * so the script never writes into the app's own screens.
+ * The falling animation is its own canvas (z-index 35): over the order list,
+ * under the header (50), the forms (60/70) and messages (90), and never takes taps.
+ * ------------------------------------------------------------------------- */
+.ca-hdr-tag { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; align-items: center; padding: 0 22px;
+  font: 400 13px/1 'Oswald'; letter-spacing: .32em; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-ca-season] .ca-hdr-tag { color: #F4F2EC; text-shadow: 0 1px 6px rgba(0,0,0,.75);
+  background-image: linear-gradient(90deg, #0E0F12 0%, rgba(14,15,18,.84) 30%, rgba(14,15,18,.40) 70%, #0E0F12 100%), var(--ca-season-img);
+  background-size: cover; background-position: var(--ca-season-pos, center); }
+@media (max-width: 1100px) { .ca-hdr-tag { font-size: 0; letter-spacing: 0; padding: 0; } }   /* tablets in portrait: photo strip only, no words */
+
+.ca-season-name::after  { content: var(--ca-season-name, ""); }
+.ca-season-range::after { content: var(--ca-season-range, ""); }
+.ca-season-fxbtn::after { content: var(--ca-season-fx, ""); }
+.ca-season-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--ca-season-accent, #91897B); box-shadow: 0 0 8px var(--ca-season-accent, transparent); }
+
+/* Season chip (list header + PIN screen): hidden unless the theme loaded. */
+.season-chip { display: none; }
+html[data-ca-season] .season-chip { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .5rem; margin-top: .75rem;
+  font: 600 .78rem/1 'Oswald'; letter-spacing: .12em; text-transform: uppercase; color: #F4F2EC; }
+.season-sep { color: rgba(244,242,236,.55); }
+.season-fx { margin-left: auto; min-height: 2.4rem; padding: 0 .8rem; border-radius: 100px; border: 1px solid rgba(255,255,255,.25); background: rgba(10,11,13,.6);
+  font: 600 .66rem/1 'Oswald'; letter-spacing: .1em; text-transform: uppercase; color: #D9D6CF; }
+
+/* The order list's title block becomes the dashboard's photo banner. */
+html[data-ca-season] .ca-season-head { position: relative; border-bottom: 1px solid #2A2C32; border-left: 3px solid var(--ca-season-accent, #91897B);
+  background-image: linear-gradient(90deg, rgba(10,11,13,.94) 0%, rgba(10,11,13,.80) 45%, rgba(10,11,13,.35) 100%), var(--ca-season-img);
+  background-size: cover; background-position: var(--ca-season-pos, center); }
+html[data-ca-season] .ca-season-head h1, html[data-ca-season] .ca-season-head .list-sub { text-shadow: 0 1px 6px rgba(0,0,0,.7); }
+
+/* PIN screen: the season photo behind a dark card. */
+html[data-ca-season] .ca-season-pin {
+  background-image: radial-gradient(ellipse at 50% 45%, rgba(8,8,10,.55) 0%, rgba(8,8,10,.86) 60%, rgba(8,8,10,.96) 100%), var(--ca-season-img);
+  background-size: cover; background-position: var(--ca-season-pos, center); }
+html[data-ca-season] .ca-season-pin .pin-box { background: rgba(12,12,15,.82); border: 1px solid #2A2C32; border-radius: 1.4rem; padding: 1.6rem 1.4rem;
+  box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-content: center; background: rgba(10,11,13,.6); border: 1px solid rgba(255,255,255,.18);
+  border-left: 3px solid var(--ca-season-accent, #91897B); border-radius: 100px; padding: .55rem .9rem; }
+
+@media print { .ca-season-fx { display: none !important; } }
