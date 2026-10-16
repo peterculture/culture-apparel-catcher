@@ -30,8 +30,6 @@
     mode: "board",         // "board" (In Production) | "past" (Past Orders)
     past: [], pastLoaded: false, pastError: "", pastSelId: null,
     del: null,             // { boxId, requestId } while the Delete Box dialog is open
-    sessEnd: 0,            // when this sign-in ends, on the tablet's stopwatch (performance.now, not the clock)
-    sessWarned: false,
     logoutPending: null,   // a logout waiting for a save that's already on its way to Salesforce
     draft: null,           // an unsaved form kept for the SAME catcher after an automatic sign-out
     signoutMsg: ""
@@ -154,42 +152,15 @@
     label.textContent = kind === "live" ? "Live" : kind === "down" ? "Not connected" : "Connecting";
   }
 
-  /* ---------------------------------------------- 5-minute sign-in ------ */
-  // The SERVER decides when a sign-in ends (it's inside the signed cookie, on the server's clock)
-  // and refuses every save after that. The tablet counts down with performance.now(), a stopwatch
-  // that doesn't change when someone changes the tablet's clock, so it signs out on time too.
-  function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
-  function startSession(expiresIn) {
-    var secs = Number(expiresIn);
-    state.sessEnd = nowMs() + (secs > 0 ? secs : 300) * 1000;
-    state.sessWarned = false;
-    tickSession();
-  }
-  function sessionLeft() { return state.sessEnd ? state.sessEnd - nowMs() : 0; }
+  /* ------------------------------------------------------------ sign-in -- */
+  // No timed sign-out (Anthony 2026-10-16): a catcher stays signed in until they tap their
+  // name to log out, or the app is refreshed (every page load starts signed out).
   function hasUnsaved() {
     var o = current(); if (!o) return false;
     if (state.sheet === "box" && state.box) return boxTotal(o, state.box) > 0;
     if (state.sheet === "mis" && state.mis) return !!(state.mis.size || state.mis.reason || state.mis.note);
     if (state.sheet === "dup" && state.dup) return true;
     return false;
-  }
-  function tickSession() {
-    var el = document.getElementById("who-left");
-    if (!state.user || !state.sessEnd) { if (el) el.textContent = ""; return; }
-    var left = sessionLeft(), secs = Math.max(0, Math.ceil(left / 1000));
-    if (el) { el.textContent = Math.floor(secs / 60) + ":" + ("0" + (secs % 60)).slice(-2); el.className = "who-left" + (secs <= 60 ? " low" : ""); }
-    if (left <= 60000 && !state.sessWarned && left > 0) {
-      state.sessWarned = true;
-      showToast({ kind: "unsure", title: "SIGNING OUT IN 1 MINUTE",
-        body: hasUnsaved() ? "Save the box you're entering now. Anything not saved is kept for you to finish after you sign in again." : "The next catcher will need to enter their PIN." });
-    }
-    if (left <= 0) endSession("timeout");
-  }
-  /** Time's up. A save already on its way to Salesforce finishes first; then sign out. */
-  function endSession(reason) {
-    if (!state.user) return;
-    if (state.saving) { state.logoutPending = state.logoutPending || reason; return; }
-    doLogout(reason);
   }
   function afterSave() {
     if (!state.user) { state.logoutPending = null; return; }
@@ -211,14 +182,13 @@
       state.draft = null;
     }
     api("POST", "/api/logout");
-    state.user = null; state.sessEnd = 0; state.sessWarned = false; state.logoutPending = null;
+    state.user = null; state.logoutPending = null;
     state.orders = []; state.loaded = false; state.loadError = ""; state.selId = null;
     state.past = []; state.pastLoaded = false; state.pastError = ""; state.pastSelId = null;
     state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null;
     state.pending = null; state.saving = false; state.pin = ""; state.pinErr = ""; state.mode = "board"; state.view = "list";
     clearTimeout(toastTimer); state.toast = null;
-    state.signoutMsg = reason === "timeout" ? "Signed out after 5 minutes, so every box is credited to the right catcher."
-      : reason === "expired" ? "Your sign-in ended." : "";
+    state.signoutMsg = reason === "expired" ? "Your sign-in ended." : "";
     if (state.draft) state.signoutMsg += " " + state.draft.user + "'s unsaved entries on " + state.draft.num + " are kept and reopen when " + firstName(state.draft.user) + " signs in again.";
     $overlay.removeAttribute("data-shown");
     renderAll(); setConn("");
@@ -286,7 +256,7 @@
 
   function loadSetup() {
     return Promise.all([api("GET", "/api/me"), api("GET", "/api/box-types")]).then(function (rs) {
-      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; if (!state.sessEnd) startSession(rs[0].data.expiresIn); }
+      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; }
       if (rs[1].ok) state.boxTypes = rs[1].data.types || [];
     });
   }
@@ -883,7 +853,6 @@
   /* ------------------------------------------------------------- saving -- */
   function send(kind, payload, opts) {
     if (state.saving) return;                 // a second tap does nothing
-    if (sessionLeft() <= 0) { endSession("timeout"); return; }   // time's up: no new saves on this sign-in
     opts = opts || {};
     state.saving = true; state.pending = { kind: kind, payload: payload, opts: opts };
     state.toast = null; renderToast(); renderOverlay();
@@ -990,7 +959,6 @@
         if (r.ok) {
           state.pin = ""; state.pinErr = ""; state.signoutMsg = "";
           loadSetup().then(function () {
-            startSession(r.data.expiresIn);    // the server's 5 minutes, counted on the tablet's stopwatch
             renderAll();
             var d = state.draft;
             if (d && state.user && d.user !== state.user.name) state.draft = null;   // never hand one catcher's entries to another
@@ -1210,11 +1178,8 @@
   window.addEventListener("beforeunload", function (e) { if (state.saving) { e.preventDefault(); e.returnValue = ""; } });
   document.addEventListener("visibilitychange", function () {
     if (document.hidden || !state.user) return;
-    // Back from sleep: the tablet's stopwatch may have paused, so ask the server how long is really left.
-    api("GET", "/api/me").then(function (r) { if (r.ok && state.user) { var w = state.sessWarned; startSession(r.data.expiresIn); state.sessWarned = w && sessionLeft() <= 60000; } });
     if (!state.sheet && !state.saving) { if (state.mode === "past") loadPast(true); else loadOrders(true); }
   });
-  setInterval(tickSession, 1000);
 
   function tickClock() {
     document.getElementById("clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -1226,8 +1191,8 @@
 
   /* ------------------------------------------------------------ start ---- */
   applyZoom();
-  loadSetup().then(function () {
-    renderAll();
-    if (state.user) loadOrders(); else setConn("");
+  // A refresh (any page load) signs out: end any earlier sign-in on the server, then show the PIN pad.
+  api("POST", "/api/logout").then(function () {
+    renderAll(); setConn("");
   });
 })();

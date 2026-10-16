@@ -645,24 +645,23 @@ await test("Edit Box: someone else changed the box first -> not overwritten", as
   ok(r.status === 409 && d.error === "changed" && db.boxes[0].Packaging_Quantity__c === 10, "412 from Salesforce -> 'someone changed this box', nothing overwritten");
 });
 
-await test("5-minute sign-in: ends on the server's clock; logout cancels it; saves need a live sign-in", async () => {
+await test("No 5-minute sign-out: stays signed in until logout; logout cancels it; saves need a live sign-in", async () => {
   reset(); const env = ENV();
   const lr = await login.onRequestPost({ request: req("POST", "/api/login", { pin: "4821" }), env });
   const ld = await lr.json();
   const set = lr.headers.get("Set-Cookie"); const cookie = set.split(";")[0];
-  ok(ld.expiresIn === 300 && /Max-Age=300/.test(set), "sign-in lasts 5 minutes (300 s)");
+  ok(ld.expiresIn === 7 * 24 * 3600 && !/Max-Age/.test(set), "no 5-minute limit; browser-session cookie (no Max-Age)");
   let r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
   let d = await r.json();
-  ok(r.status === 200 && d.name === "Maria R." && d.expiresIn > 295 && d.expiresIn <= 300, "/api/me says who and how long is left");
+  ok(r.status === 200 && d.name === "Maria R." && d.expiresIn > 7 * 24 * 3600 - 5, "/api/me says who");
   const realNow = Date.now;
   try {
-    Date.now = () => realNow() + 4 * 60 * 1000 + 50 * 1000;               // 4:50 later: still signed in
+    Date.now = () => realNow() + 10 * 3600 * 1000;                        // 10 hours later: still signed in
     r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
-    d = await r.json();
-    ok(r.status === 200 && d.expiresIn <= 10, "at 4:50 still signed in, ~10 s left");
-    Date.now = () => realNow() + 5 * 60 * 1000 + 1000;                    // 5:01 later
+    ok(r.status === 200, "10 hours later still signed in (no timed sign-out)");
+    Date.now = () => realNow() + 7 * 24 * 3600 * 1000 + 1000;             // past the 7-day safety limit
     r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
-    ok(r.status === 401, "after 5 minutes the server says signed out");
+    ok(r.status === 401, "a cookie past the 7-day safety limit is refused");
     r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", qty: 5, name: "Tees 9", requestId: "req-exp00001" }, cookie), env });
     ok(r.status === 401 && posts("/sobjects/Order_Packaging__c").length === 0, "an expired sign-in can't save a box");
     r = await dup.onRequestPost({ request: req("POST", "/api/duplicate-box", { orderId: "801000000000001AAA", boxId: "a0X000000000001AAA", count: 2, requestId: "req-exp00002" }, cookie), env });
