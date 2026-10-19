@@ -53,6 +53,8 @@ Pages project, its own Salesforce connection and its own PIN list.
   copied cookie can't work forever. Signing out also cancels the sign-in on the server (KV
   `revoked:<id>`). If the server ever refuses a sign-in, unsaved entries are kept only for the SAME
   catcher and reopen when they sign in again; the next catcher never gets them.
+- **No pull-down refresh (10-19):** `overscroll-behavior: none` on the page, so swiping down from the
+  top of the tablet doesn't reload the app (a reload signs the catcher out).
 - **Counted By** (`Order_Packaging__c.CountedBy__c`, Text 80): the signed-in catcher, written on every
   new box and duplicate; an edit keeps the original counter. Salesforce's Created By always says
   "Catcher App" (one app login), so this is the field that says who counted. Older boxes fall back to

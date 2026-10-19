@@ -15,9 +15,10 @@
   --hdr: 78px;
 }
 * { box-sizing: border-box; }
-html { font-size: calc(16px * var(--z)); -webkit-text-size-adjust: 100%; }
+html { font-size: calc(16px * var(--z)); -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none; }   /* no pull-down-to-refresh: a refresh signs the catcher out */
 body { margin: 0; background: var(--surface-page); color: var(--text-primary); font-family: 'Archivo', system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased; overflow: hidden; height: 100vh; height: 100dvh; touch-action: manipulation; }
+  -webkit-font-smoothing: antialiased; overflow: hidden; height: 100vh; height: 100dvh; touch-action: manipulation; overscroll-behavior: none; }
 button { font-family: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 button:disabled { cursor: default; }
 button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft); outline-offset: 2px; }
