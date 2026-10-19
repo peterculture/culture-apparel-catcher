@@ -55,6 +55,9 @@ Pages project, its own Salesforce connection and its own PIN list.
   catcher and reopen when they sign in again; the next catcher never gets them.
 - **No pull-down refresh (10-19):** `overscroll-behavior: none` on the page, so swiping down from the
   top of the tablet doesn't reload the app (a reload signs the catcher out).
+- **Screen stays on (10-19):** while a catcher is signed in the app asks the browser for a screen wake
+  lock, so the tablet doesn't dim or lock between orders. It's released on sign-out and asked for
+  again when the app comes back to the front. Browsers without wake lock behave as before.
 - **Counted By** (`Order_Packaging__c.CountedBy__c`, Text 80): the signed-in catcher, written on every
   new box and duplicate; an edit keeps the original counter. Salesforce's Created By always says
   "Catcher App" (one app login), so this is the field that says who counted. Older boxes fall back to

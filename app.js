@@ -169,6 +169,7 @@
 
   /** End the sign-in for real (server + tablet) and clear everything that belonged to that catcher. */
   function doLogout(reason) {
+    releaseAwake();
     var who = state.user ? state.user.name : "";
     var o = current();
     // An unfinished form is kept ONLY for the same catcher, so their entries aren't lost --
@@ -254,9 +255,28 @@
   }
   function reloadAll() { loadOrders(true); loadPast(true); }
 
+  /* ------------------------------------------------------ keep awake ---- */
+  // While a catcher is signed in, ask the browser to keep the screen on so the tablet
+  // doesn't dim or lock between orders. The browser drops the lock whenever the app is
+  // hidden (tablet slept, other app), so it is asked for again when the app comes back.
+  // Older browsers without wake lock just behave as before.
+  var wakeLock = null;
+  function keepAwake() {
+    if (!state.user || document.hidden || wakeLock || !navigator.wakeLock) return;
+    navigator.wakeLock.request("screen").then(function (l) {
+      wakeLock = l;
+      l.addEventListener("release", function () { if (wakeLock === l) wakeLock = null; });
+      if (!state.user) releaseAwake();          // signed out while the request was on its way
+    }).catch(function () {});
+  }
+  function releaseAwake() {
+    var l = wakeLock; wakeLock = null;
+    if (l) l.release().catch(function () {});
+  }
+
   function loadSetup() {
     return Promise.all([api("GET", "/api/me"), api("GET", "/api/box-types")]).then(function (rs) {
-      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; }
+      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; keepAwake(); }
       if (rs[1].ok) state.boxTypes = rs[1].data.types || [];
     });
   }
@@ -1178,6 +1198,7 @@
   window.addEventListener("beforeunload", function (e) { if (state.saving) { e.preventDefault(); e.returnValue = ""; } });
   document.addEventListener("visibilitychange", function () {
     if (document.hidden || !state.user) return;
+    keepAwake();
     if (!state.sheet && !state.saving) { if (state.mode === "past") loadPast(true); else loadOrders(true); }
   });
 

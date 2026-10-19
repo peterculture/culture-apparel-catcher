@@ -195,7 +195,7 @@ await test("PIN sign-in", async () => {
   ok(/^ca_catch=/.test(cookie), "right PIN sets the cookie");
   r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
   ok(r.status === 200 && (await r.json()).name === "Maria R.", "cookie identifies Maria");
-  r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie.replace(/.$/, "x")), env });
+  r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie.replace(/.$/, (c) => (c === "x" ? "y" : "x"))), env });
   ok(r.status === 401, "tampered cookie is refused");
   const env2 = Object.assign({}, env, { CATCHER_PINS: JSON.stringify({ "Dev T.": "1937" }) });
   r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env: env2 });
