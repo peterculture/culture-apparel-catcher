@@ -55,6 +55,8 @@ Pages project, its own Salesforce connection and its own PIN list.
   catcher and reopen when they sign in again; the next catcher never gets them.
 - **No pull-down refresh (10-19):** `overscroll-behavior: none` on the page, so swiping down from the
   top of the tablet doesn't reload the app (a reload signs the catcher out).
+- **Progress on each order card (10-19):** "180 of 300 boxed · 4 boxes" plus a bar: grey while
+  boxing, green when the boxes hold exactly the order's total, amber if they hold more.
 - **Screen stays on (10-19):** while a catcher is signed in the app asks the browser for a screen wake
   lock, so the tablet doesn't dim or lock between orders. It's released on sign-out and asked for
   again when the app comes back to the front. Browsers without wake lock behave as before.

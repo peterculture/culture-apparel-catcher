@@ -490,6 +490,17 @@
       '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div>' + seasonChip(true) + "</div>" + body + "</section>";
   }
 
+  /** Order card progress: garments boxed so far against the order's total, with a bar. */
+  function progressHtml(o) {
+    var boxed = o.boxes.reduce(function (a, b) { return a + (Number(b.qty) || 0); }, 0);
+    var nBox = o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes");
+    if (!(o.total > 0)) return '<span class="card-meta">' + boxed + " boxed · " + nBox + "</span>";
+    var pct = Math.round(boxed / o.total * 100);
+    var state = boxed > o.total ? " over" : boxed === o.total ? " full" : "";
+    return '<span class="card-meta"><b>' + boxed + "</b> of " + o.total + " boxed · " + nBox + "</span>" +
+      '<span class="prog' + state + '" role="img" aria-label="' + pct + ' percent boxed"><i style="width:' + Math.min(100, pct) + '%"></i></span>';
+  }
+
   function listHtml() {
     if (state.mode === "past") return pastListHtml();
     var cards = state.orders.map(function (o) {
@@ -501,7 +512,7 @@
         '<span class="thumb">' + thumb + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
         '<span class="card-cust">' + esc(o.customer) + "</span>" +
-        '<span class="card-meta">' + o.total + " garments · " + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + "</span>" + tag + "</span></button>";
+        progressHtml(o) + tag + "</span></button>";
     }).join("");
     var body;
     if (!state.loaded && state.loadError) {
