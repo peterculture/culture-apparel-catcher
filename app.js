@@ -28,6 +28,7 @@
     toast: null,           // { kind: ok|err|unsure, title, body, retry }
     pin: "",
     mode: "board",         // "board" (In Production) | "past" (Past Orders)
+    q: "",                 // order search (number or customer); cleared when switching lists or signing out
     past: [], pastLoaded: false, pastError: "", pastSelId: null,
     del: null,             // { boxId, requestId } while the Delete Box dialog is open
     logoutPending: null,   // a logout waiting for a save that's already on its way to Salesforce
@@ -183,7 +184,7 @@
       state.draft = null;
     }
     api("POST", "/api/logout");
-    state.user = null; state.logoutPending = null;
+    state.user = null; state.logoutPending = null; state.q = "";
     state.orders = []; state.loaded = false; state.loadError = ""; state.selId = null;
     state.past = []; state.pastLoaded = false; state.pastError = ""; state.pastSelId = null;
     state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null;
@@ -314,9 +315,41 @@
 
   function renderMain() {
     if (!state.user) { $app.innerHTML = pinHtml(); return; }
+    // While someone is typing in the search box, a background refresh waits until they leave the
+    // box, so the keyboard doesn't close mid-word. (Tapping anything else leaves the box first.)
+    var a = document.activeElement;
+    if (a && a.id === "order-search") { renderPending = true; return; }
+    renderPending = false;
     $app.innerHTML = listHtml() + detailHtml();
+    applySearch();
     wireImages();
     applyZoom();
+  }
+
+  /* ------------------------------------------------------------ search --- */
+  var renderPending = false;
+  function searchKey(o) {
+    var num = String(o.num || "");
+    return (num + " " + num.replace(/[^a-z0-9]/gi, "") + " " + (o.customer || "")).toLowerCase();
+  }
+  function searchBoxHtml() {
+    return '<div class="search"><input id="order-search" type="search" enterkeyhint="done" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" ' +
+      'placeholder="Search order # or customer" aria-label="Search orders by number or customer" value="' + esc(state.q) + '">' +
+      '<button class="search-x" data-act="search-clear" aria-label="Clear search"' + (state.q ? "" : " hidden") + ">" + ICON.x + "</button></div>" +
+      '<div class="empty search-none" id="search-none" hidden></div>';
+  }
+  /** Show only the cards that match the search, without rebuilding the list. */
+  function applySearch() {
+    var words = state.q.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+    var shown = 0, total = 0;
+    Array.prototype.forEach.call($app.querySelectorAll(".card[data-q]"), function (c) {
+      total++;
+      var k = c.getAttribute("data-q"), hit = words.every(function (w) { return k.indexOf(w) >= 0; });
+      c.hidden = !hit; if (hit) shown++;
+    });
+    var none = document.getElementById("search-none");
+    if (none) { none.hidden = !(total && !shown); none.innerHTML = "<strong>NO MATCH</strong>Nothing on this list matches “" + esc(state.q) + "”."; }
+    var x = $app.querySelector(".search-x"); if (x) x.hidden = !state.q;
   }
 
   /* ----------------------------------------------------------- mockups --- */
@@ -474,7 +507,7 @@
     var cards = state.past.map(function (o) {
       var open = o.boxes.filter(canChangeBox).length;
       var tag = open ? '<span class="tag edit">' + open + (open === 1 ? " BOX" : " BOXES") + " EDITABLE</span>" : '<span class="tag lock">READ-ONLY · PAST 7 DAYS</span>';
-      return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" aria-pressed="' + (o.id === state.pastSelId) + '">' +
+      return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" data-q="' + esc(searchKey(o)) + '" aria-pressed="' + (o.id === state.pastSelId) + '">' +
         '<span class="thumb">' + ICON.box + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
         '<span class="card-cust">' + esc(o.customer) + "</span>" +
@@ -487,7 +520,7 @@
     else body = (state.pastError ? '<div class="empty" style="margin-bottom:0"><strong>MAY BE OUT OF DATE</strong>' + esc(state.pastError) + "</div>" : "") + '<div class="cards">' + cards + "</div>";
     return '<section class="list" aria-label="Past orders">' + modeTabs() +
       '<div class="list-head ca-season-head"><div class="list-title"><h1>PAST ORDERS</h1><span class="list-count">' + state.past.length + "</span></div>" +
-      '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div>' + seasonChip(true) + "</div>" + body + "</section>";
+      '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div>' + seasonChip(true) + "</div>" + (state.past.length ? searchBoxHtml() : "") + body + "</section>";
   }
 
   /** Order card progress: garments boxed so far against the order's total, with a bar. */
@@ -508,7 +541,7 @@
       var thumb = o.hasMockup ? '<img class="thumb-img" alt="" data-mock="' + esc(o.id) + ':0"><span class="mock-wait">' + ICON.shirt + "</span>" : ICON.shirt;
       var tag = !o.inProduction ? '<span class="tag moved">MOVED ON · FINISH COUNT</span>'
         : o.finished ? '<span class="tag done">✓ COUNTED · ' + o.finishedCount + (o.finishedCount === 1 ? " BOX" : " BOXES") + "</span>" : "";
-      return '<button class="card' + (o.inProduction ? "" : " moved") + '" data-act="pick" data-id="' + esc(o.id) + '" aria-pressed="' + sel + '">' +
+      return '<button class="card' + (o.inProduction ? "" : " moved") + '" data-act="pick" data-id="' + esc(o.id) + '" data-q="' + esc(searchKey(o)) + '" aria-pressed="' + sel + '">' +
         '<span class="thumb">' + thumb + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
         '<span class="card-cust">' + esc(o.customer) + "</span>" +
@@ -528,7 +561,7 @@
     }
     return '<section class="list" aria-label="Orders in production">' + modeTabs() +
       '<div class="list-head ca-season-head"><div class="list-title"><h1>IN PRODUCTION</h1><span class="list-count">' + state.orders.length + "</span></div>" +
-      '<div class="list-sub"><i></i>SCREEN PRINT ONLY</div>' + seasonChip(true) + "</div>" + body + "</section>";
+      '<div class="list-sub"><i></i>SCREEN PRINT ONLY</div>' + seasonChip(true) + "</div>" + (state.orders.length ? searchBoxHtml() : "") + body + "</section>";
   }
 
   /* Seasonal / holiday theme -- the production dashboard's own seasonal.js + photos
@@ -1073,9 +1106,14 @@
       if (state.mode === "past") state.pastSelId = el.getAttribute("data-id"); else state.selId = el.getAttribute("data-id");
       state.view = "detail"; renderMain();
     },
+    "search-clear": function () {
+      state.q = ""; applySearch();
+      var i = document.getElementById("order-search"); if (i) { i.value = ""; i.focus(); }
+      if (renderPending) renderMain();
+    },
     mode: function (el) {
       var m = el.getAttribute("data-m"); if (m === state.mode) return;
-      state.mode = m; state.view = "list"; renderMain();
+      state.mode = m; state.view = "list"; state.q = ""; renderMain();
       if (m === "past") loadPast(state.pastLoaded); else loadOrders(true);
     },
     "open-edit": function (el) {
@@ -1194,6 +1232,14 @@
   });
   document.addEventListener("input", function (e) {
     if (e.target && e.target.id === "mis-note" && state.mis) state.mis.note = e.target.value.slice(0, 80);
+    if (e.target && e.target.id === "order-search") { state.q = e.target.value.slice(0, 60); applySearch(); }
+  });
+  // Leaving the search box: catch up on any refresh that waited while typing; "Done" closes the keyboard.
+  document.addEventListener("focusout", function (e) {
+    if (e.target && e.target.id === "order-search" && renderPending) setTimeout(function () { if (renderPending) renderMain(); }, 600);   // after a tap on a card has landed
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.target && e.target.id === "order-search" && e.key === "Enter") { e.preventDefault(); e.target.blur(); }
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; renderOverlay(); }
