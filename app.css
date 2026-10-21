@@ -237,6 +237,12 @@ img[data-mock].ready + .mock-wait { display: none; }
 .big-done { width: 100%; min-height: 5.5rem; border: 2px solid var(--ok-strong); background: var(--ok-bg); color: var(--ok-text); }
 .big-done.go { background: var(--ok-strong); color: #fff; border-color: var(--ok); }
 .big-done:disabled { opacity: .45; }
+/* Fulfillment (10-21): next to FINISH CATCHING while an order has no boxes */
+.fin-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: .9rem; }
+.fin-row .big { min-height: 5.5rem; }
+.big-ful { min-height: 5.5rem; border: 2px solid var(--border-strong); background: var(--surface-card); color: var(--text-primary); }
+.big-ful.done { width: 100%; border-color: var(--ok-strong); background: var(--ok-bg); color: var(--ok-text); }
+body.narrow .fin-row { grid-template-columns: 1fr; }
 .fin-sum { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
 .fin-sum .stat .v { font-size: 2.6rem; }
 .fin-warn { padding: .9rem 1.1rem; border-radius: .9rem; background: var(--warn-bg); border: 1px solid var(--warn); color: var(--warn-soft); font: 500 1rem/1.4 'Archivo'; }

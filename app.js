@@ -525,6 +525,7 @@
 
   /** Order card progress: garments boxed so far against the order's total, with a bar. */
   function progressHtml(o) {
+    if (isFulfillment(o)) return '<span class="card-meta">Fulfillment order. No boxes.</span>';
     var boxed = o.boxes.reduce(function (a, b) { return a + (Number(b.qty) || 0); }, 0);
     var nBox = o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes");
     if (!(o.total > 0)) return '<span class="card-meta">' + boxed + " boxed · " + nBox + "</span>";
@@ -540,6 +541,7 @@
       var sel = o.id === state.selId;
       var thumb = o.hasMockup ? '<img class="thumb-img" alt="" data-mock="' + esc(o.id) + ':0"><span class="mock-wait">' + ICON.shirt + "</span>" : ICON.shirt;
       var tag = !o.inProduction ? '<span class="tag moved">MOVED ON · FINISH COUNT</span>'
+        : isFulfillment(o) ? '<span class="tag done">✓ FULFILLMENT · NO BOXES</span>'
         : o.finished ? '<span class="tag done">✓ COUNTED · ' + o.finishedCount + (o.finishedCount === 1 ? " BOX" : " BOXES") + "</span>" : "";
       return '<button class="card' + (o.inProduction ? "" : " moved") + '" data-act="pick" data-id="' + esc(o.id) + '" data-q="' + esc(searchKey(o)) + '" aria-pressed="' + sel + '">' +
         '<span class="thumb">' + thumb + "</span>" +
@@ -649,14 +651,28 @@
       (boxRowsHtml(o, false) || '<div class="empty" style="margin:0">No boxes on this order any more.</div>') + "</div></main>";
   }
 
+  /** Fulfillment order: finished with a box count of 0 and no boxes logged (10-21). */
+  function isFulfillment(o) { return !!o.finished && Number(o.finishedCount) === 0 && !o.boxes.length; }
+
   function finishBtn(o) {
     var n = o.boxes.length;
-    if (!n) return '<button class="big big-done" disabled>' + ICON.check + "FINISH CATCHING · LOG A BOX FIRST</button>";
+    if (isFulfillment(o)) return '<div class="big big-ful done" role="status">' + ICON.check + "FULFILLMENT ORDER. NO BOXES.</div>";
+    if (!n) return '<div class="fin-row"><button class="big big-done" disabled>' + ICON.check + "FINISH CATCHING · LOG A BOX FIRST</button>" +
+      '<button class="big big-ful" data-act="open-ful">' + ICON.box + "FULFILLMENT</button></div>";
     if (o.finished && o.finishedCount === n) return '<button class="big big-done" data-act="open-fin">' + ICON.check + "COUNTED · " + n + (n === 1 ? " BOX" : " BOXES") + "</button>";
     return '<button class="big big-done go" data-act="open-fin">' + ICON.check + (o.finished ? "UPDATE COUNT · " : "FINISH CATCHING · ") + n + (n === 1 ? " BOX" : " BOXES") + "</button>";
   }
 
   function finSheetHtml(o) {
+    if (state.fin && state.fin.fulfillment) {
+      return '<div class="scrim"><div class="sheet" role="dialog" aria-label="Fulfillment order">' +
+        '<div class="sheet-head"><div class="sheet-title"><h2>FULFILLMENT · ' + esc(o.num) + "</h2>" +
+        "<p>Skips boxing. Saves this order in Salesforce as a fulfillment order with no boxes (Packaging Count 0)" + (o.inProduction ? "." : ", then it leaves your board.") + "</p></div>" +
+        '<button class="x" data-act="close" aria-label="Close">' + ICON.x + "</button></div>" +
+        '<div class="fin-warn">Only for orders that go to fulfillment without being boxed here. If any garments get boxed, close this and use LOG BOXES instead.</div>' +
+        '<button class="save ok' + (state.saving ? " busy" : "") + '" data-act="save-fin"' + (state.saving ? " disabled" : "") + ">" +
+        (state.saving ? '<span class="spin"></span>SAVING TO SALESFORCE…' : "YES, FULFILLMENT ORDER. NO BOXES.") + "</button></div></div>";
+    }
     var n = o.boxes.length, boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
     var short = boxed !== o.total;
     return '<div class="scrim"><div class="sheet" role="dialog" aria-label="Finish catching">' +
@@ -953,7 +969,8 @@
           showToast({ kind: "ok", title: "BOX SAVED", body: "“" + r.data.box.name + "” · " + (r.data.box.sizes ? r.data.box.sizes.replace(/ = \d+$/, "") + " · " : "") + r.data.box.qty + " garments · " + r.data.box.type + " is in Salesforce on " + o.num + "." });
         } else if (kind === "fin" && o) {
           o.finished = true; o.finishedCount = r.data.boxCount;
-          showToast({ kind: "ok", title: "ORDER FINISHED", body: o.num + ": " + r.data.boxCount + (r.data.boxCount === 1 ? " box" : " boxes") + " saved as the box count in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
+          if (r.data.fulfillment) showToast({ kind: "ok", title: "FULFILLMENT ORDER", body: o.num + ": Fulfillment order. No boxes. Saved in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
+          else showToast({ kind: "ok", title: "ORDER FINISHED", body: o.num + ": " + r.data.boxCount + (r.data.boxCount === 1 ? " box" : " boxes") + " saved as the box count in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
           if (!o.inProduction) {
             state.orders = state.orders.filter(function (x) { return x.id !== o.id; });
             state.selId = state.orders.length ? state.orders[0].id : null; state.view = "list";
@@ -1210,7 +1227,17 @@
       state.fin = { requestId: newRequestId() };
       state.sheet = "fin"; state.toast = null; renderToast(); renderOverlay();
     },
-    "save-fin": function () { var o = current(); if (o && state.fin) send("fin", { orderId: o.id, requestId: state.fin.requestId }); },
+    "open-ful": function () {
+      var o = current(); if (!o || o.boxes.length) return;
+      state.fin = { requestId: newRequestId(), fulfillment: true };
+      state.sheet = "fin"; state.toast = null; renderToast(); renderOverlay();
+    },
+    "save-fin": function () {
+      var o = current(); if (!o || !state.fin) return;
+      var p = { orderId: o.id, requestId: state.fin.requestId };
+      if (state.fin.fulfillment) p.fulfillment = true;
+      send("fin", p);
+    },
     "mis-line": function (el) { state.mis.line = Number(el.getAttribute("data-i")); state.mis.size = null; renderOverlay(); },
     "mis-size": function (el) { state.mis.size = el.getAttribute("data-v"); renderOverlay(); },
     "mis-reason": function (el) { state.mis.reason = el.getAttribute("data-v"); renderOverlay(); },

@@ -55,6 +55,11 @@ Pages project, its own Salesforce connection and its own PIN list.
   catcher and reopen when they sign in again; the next catcher never gets them.
 - **No pull-down refresh (10-19):** `overscroll-behavior: none` on the page, so swiping down from the
   top of the tablet doesn't reload the app (a reload signs the catcher out).
+- **Fulfillment (10-21):** while an order has no boxes, a FULFILLMENT button sits next to FINISH
+  CATCHING. After a confirm step it writes `Packaging_Count__c = 0` (nothing else). The app shows a
+  count of 0 with no boxes as "Fulfillment order. No boxes." on the card and the order. Like any
+  finished order, it leaves the board once it's out of In Production. The server refuses it if the
+  order has any boxes, so a real count is never replaced by 0.
 - **Search (10-19):** a box above each list (In Production and Past Orders) filters the cards by order
   number or customer as you type (every word must match; "1234" also finds "SO-1234"). The list's own
   30-second refresh waits while someone is typing, so the keyboard doesn't close. Cleared when switching
