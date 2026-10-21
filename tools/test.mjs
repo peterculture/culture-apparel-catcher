@@ -195,7 +195,7 @@ await test("PIN sign-in", async () => {
   ok(/^ca_catch=/.test(cookie), "right PIN sets the cookie");
   r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env });
   ok(r.status === 200 && (await r.json()).name === "Maria R.", "cookie identifies Maria");
-  r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie.replace(/.$/, (c) => (c === "x" ? "y" : "x"))), env });
+  r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie.replace(/^(ca_catch=)(.)/, (m, k, c) => k + (c === "e" ? "f" : "e"))), env });
   ok(r.status === 401, "tampered cookie is refused");
   const env2 = Object.assign({}, env, { CATCHER_PINS: JSON.stringify({ "Dev T.": "1937" }) });
   r = await me.onRequestGet({ request: req("GET", "/api/me", null, cookie), env: env2 });
@@ -403,6 +403,28 @@ await test("Mockup: pictures in the order's Files list come first, newest first;
   r = await get(2);
   ok(r.status === 404, "n past the end -> 404");
   ok(!calls.some((c) => c.url.includes("file.force.com")), "Artwork URL not used when files exist");
+});
+
+await test("Fulfillment: no boxes -> Packaging Count 0; refused if the order has boxes", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const list = async () => (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders;
+  let r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000001AAA", requestId: "req-ful00001", fulfillment: true }, cookie), env });
+  let d = await r.json();
+  ok(r.status === 400 && d.error === "has_boxes" && db.orders[0].Packaging_Count__c == null, "order with boxes: refused, nothing written");
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000002AAA", requestId: "req-ful00002", fulfillment: true }, cookie), env });
+  d = await r.json();
+  ok(r.status === 200 && d.fulfillment === true && d.boxCount === 0, "no boxes: 200, fulfillment, box count 0");
+  ok(db.orders[1].Packaging_Count__c === 0, "Packaging_Count__c = 0 written to the Order");
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000002AAA", requestId: "req-ful00002", fulfillment: true }, cookie), env });
+  ok(r.status === 200 && posts("/sobjects/Order/801000000000002AAA").length === 1, "double tap: same answer, written once");
+  let l = await list();
+  let o = l.find((x) => x.id === "801000000000002AAA");
+  ok(o && o.finished === true && o.finishedCount === 0, "still In Production: stays on the board, finished with count 0");
+  db.orders[1]._inProd = false;
+  l = await list();
+  ok(!l.some((x) => x.id === "801000000000002AAA"), "fulfillment order moved on -> off the board");
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000001AAA", requestId: "req-ful00003" }, cookie), env });
+  ok(r.status === 200 && db.orders[0].Packaging_Count__c === 1, "plain FINISH CATCHING unchanged");
 });
 
 await test("Moved to Post-Production early: stays on the board until FINISH CATCHING", async () => {
