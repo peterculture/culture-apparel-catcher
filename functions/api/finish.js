@@ -6,6 +6,11 @@
  * this order?"). Once that is filled in and the order has left In Production,
  * it drops off the board.
  *
+ * FULFILLMENT  { orderId, requestId, fulfillment: true }  (added 10-21)
+ * A fulfillment order skips boxing: Packaging_Count__c is set to 0, which the app
+ * shows as "Fulfillment order. No boxes." Only allowed while the order has no boxes
+ * logged, so a real box count is never overwritten with 0.
+ *
  * Answers 200 only after Salesforce has confirmed the update.
  */
 import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
@@ -25,8 +30,12 @@ export async function onRequestPost({ request, env }) {
 
     return await withRequestId(env, requestId, 200, async () => {
       const order = await loadOneOrder(env, orderId);
+      const fulfillment = body.fulfillment === true;
       const count = order.boxes.length;
-      if (!count) return json({ error: "no_boxes", message: "Log at least one box before finishing this order." }, 400);
+      if (fulfillment && count) {
+        return json({ error: "has_boxes", message: `${order.num} has ${count} ${count === 1 ? "box" : "boxes"} logged, so it can't be a fulfillment order. Use FINISH CATCHING, or delete the boxes first.` }, 400);
+      }
+      if (!fulfillment && !count) return json({ error: "no_boxes", message: "Log at least one box before finishing this order." }, 400);
 
       const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/Order/${order.id}`, {
         method: "PATCH",
@@ -40,7 +49,7 @@ export async function onRequestPost({ request, env }) {
           "Salesforce did not save the box count" + (sfMessage(data) ? `: "${sfMessage(data)}"` : ".") + " The order stays on the board.");
       }
       const result = {
-        ok: true, orderId: order.id, boxCount: count,
+        ok: true, orderId: order.id, boxCount: count, fulfillment,
         boxed: order.boxes.reduce((a, b) => a + b.qty, 0), total: order.total,
         inProduction: order.inProduction, by: auth.user.name,
       };
