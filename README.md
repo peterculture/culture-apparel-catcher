@@ -24,6 +24,19 @@ Pages project, its own Salesforce connection and its own PIN list.
     Boxes logged before 10-15 (and by the flow or the dashboard) leave it blank and show just their total.
   - Sizes come from the order's own lines (`OrderItem.Size__c` is free text, so there's no fixed size list).
   - Box count = number of records.
+- **Add More / extras (10-26):** the garment supplier sometimes sends extras that get printed and boxed
+  for the customer. Every box form has a **+ ADD MORE** tile (one per garment on the order). It opens a
+  size picker (YXS … 5XL, OSFA, or type another size up to 10 characters, e.g. 6XL); the picked size gets
+  its own dashed EXTRA tile, counted on the number pad like any size. Extras of a size that IS on the
+  order aren't added this way -- they're just counted in that size, past what's left.
+  - Saved in the same box record: `Quantity_Size_Counted__c` marks them, e.g. `M 20 · 2XL 3 (extra) = 23`,
+    and `Packaging_Quantity__c` includes them (they're really in the box). No new Salesforce field.
+  - The app keeps extras apart from the order's own count: card "20 of 56 boxed + 3 extra", the order's
+    size panel shows an EXTRA tile (+3), and FINISH CATCHING compares only the order's garments to its total.
+  - Once an extra size has been boxed on an order, its tile shows on that order's later box forms, Duplicate
+    copies it, Edit Box can change it, and Report Misprint offers it as a size.
+  - The server accepts a size that isn't on the order ONLY when it's marked extra, and only as a short
+    size name on one of the order's own garments.
 - **Save Box & New:** saves the box exactly like SAVE BOX; once Salesforce confirms, a fresh blank
   box form opens for the next box. If the save fails, everything typed stays on screen.
 - **Duplicate Box:** every saved box has a DUPLICATE BOX button. It asks "How many duplicates would you

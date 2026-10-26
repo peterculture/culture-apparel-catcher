@@ -526,12 +526,12 @@
   /** Order card progress: garments boxed so far against the order's total, with a bar. */
   function progressHtml(o) {
     if (isFulfillment(o)) return '<span class="card-meta">Fulfillment order. No boxes.</span>';
-    var boxed = o.boxes.reduce(function (a, b) { return a + (Number(b.qty) || 0); }, 0);
+    var split = boxedSplit(o), boxed = split.ordered;   // extras ("Add More") don't count against the order
     var nBox = o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes");
-    if (!(o.total > 0)) return '<span class="card-meta">' + boxed + " boxed · " + nBox + "</span>";
+    if (!(o.total > 0)) return '<span class="card-meta">' + split.all + " boxed · " + nBox + "</span>";
     var pct = Math.round(boxed / o.total * 100);
     var state = boxed > o.total ? " over" : boxed === o.total ? " full" : "";
-    return '<span class="card-meta"><b>' + boxed + "</b> of " + o.total + " boxed · " + nBox + "</span>" +
+    return '<span class="card-meta"><b>' + boxed + "</b> of " + o.total + " boxed" + extraNote(split.extra) + " · " + nBox + "</span>" +
       '<span class="prog' + state + '" role="img" aria-label="' + pct + ' percent boxed"><i style="width:' + Math.min(100, pct) + '%"></i></span>';
   }
 
@@ -580,7 +580,7 @@
     var o = current();
     if (!o) return '<main class="detail"><div class="empty">Pick an order on the left.</div></main>';
     if (state.mode === "past") return pastDetailHtml(o);
-    var boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
+    var split = boxedSplit(o), boxed = split.ordered;
     var mock = o.hasMockup
       ? '<button class="mock" data-act="mock" data-id="' + esc(o.id) + '" aria-label="Open the mockup full size"><img class="mock-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + ':0"><span class="mock-wait mock-none">LOADING<br>MOCKUP…</span><span class="badge">' + ICON.expand + '</span><span class="cap">' + ((o.mockupCount || 1) > 1 ? "TAP TO SEE ALL " + o.mockupCount : "TAP TO ENLARGE") + '</span></button>'
       : '<div class="mock"><span class="mock-none">NO MOCKUP<br>IN SALESFORCE</span></div>';
@@ -588,6 +588,8 @@
       return '<div><div class="line-head"><span>' + esc(l.product) + (l.color ? " · " + esc(l.color) : "") + '</span><span class="tot">' + l.total + "</span></div>" +
         '<div class="sizes">' + l.sizes.map(function (s) {
           return '<div class="size"><div class="s">' + esc(s.size) + '</div><div class="q">' + s.qty + "</div></div>";
+        }).join("") + (l.extras || []).map(function (e) {
+          return '<div class="size extra" title="Extra: not on the order"><div class="s">' + esc(e.size) + ' · EXTRA</div><div class="q">+' + e.boxed + "</div></div>";
         }).join("") + "</div></div>";
     }).join("");
     var log = boxRowsHtml(o, true);
@@ -601,7 +603,7 @@
       '<div class="d-meta">Print date ' + esc(fmtDate(o.printDate)) + (o.specs ? " · " + esc(o.specs) : "") + "</div></div></div>" +
       '<div class="panel">' + (lines || '<div class="hint">No garment sizes on this order in Salesforce.</div>') + "</div>" +
       '<div class="stats"><div class="stat"><div class="l">BOXES</div><div class="v">' + o.boxes.length + "</div></div>" +
-      '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + "</small></div></div>" +
+      '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + (split.extra ? " · +" + split.extra + " extra" : "") + "</small></div></div>" +
       '<div class="stat"><div class="l">MISPRINTS</div><div class="v' + (o.misprintTotal ? " warn" : "") + '">' + o.misprintTotal + "</div></div></div>" +
       '<div class="actions"><button class="big big-red" data-act="open-box">' + ICON.box + "LOG BOXES</button>" +
       '<button class="big big-warn" data-act="open-mis">' + ICON.warn + "REPORT MISPRINT</button></div>" +
@@ -633,7 +635,7 @@
 
   /** Past Orders: one order's saved boxes, for review. No logging, no finishing. */
   function pastDetailHtml(o) {
-    var boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
+    var split = boxedSplit(o), boxed = split.ordered;
     var open = o.boxes.filter(function (b) { return canChangeBox(withWindow(b)); }).length;
     var where = o.inProduction ? "STILL IN PRODUCTION" : String(o.status || "").toUpperCase() || "NOT IN PRODUCTION";
     return '<main class="detail">' +
@@ -645,7 +647,7 @@
       '<div class="d-cust">' + esc(o.customer) + "</div>" +
       '<div class="d-meta">Print date ' + esc(fmtDate(o.printDate)) + " · " + esc(where) + (o.finished ? " · Packaging Count " + o.finishedCount : "") + "</div></div></div>" +
       '<div class="stats"><div class="stat"><div class="l">BOXES</div><div class="v">' + o.boxes.length + "</div></div>" +
-      '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + "</small></div></div>" +
+      '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + (split.extra ? " · +" + split.extra + " extra" : "") + "</small></div></div>" +
       '<div class="stat"><div class="l">EDITABLE</div><div class="v">' + open + "</div></div></div>" +
       '<div class="log"><div class="sec-label">BOXES ON THIS ORDER (FROM SALESFORCE)</div>' +
       (boxRowsHtml(o, false) || '<div class="empty" style="margin:0">No boxes on this order any more.</div>') + "</div></main>";
@@ -673,15 +675,15 @@
         '<button class="save ok' + (state.saving ? " busy" : "") + '" data-act="save-fin"' + (state.saving ? " disabled" : "") + ">" +
         (state.saving ? '<span class="spin"></span>SAVING TO SALESFORCE…' : "YES, FULFILLMENT ORDER. NO BOXES.") + "</button></div></div>";
     }
-    var n = o.boxes.length, boxed = o.boxes.reduce(function (a, b) { return a + b.qty; }, 0);
+    var n = o.boxes.length, split = boxedSplit(o), boxed = split.ordered;
     var short = boxed !== o.total;
     return '<div class="scrim"><div class="sheet" role="dialog" aria-label="Finish catching">' +
       '<div class="sheet-head"><div class="sheet-title"><h2>FINISH CATCHING · ' + esc(o.num) + "</h2>" +
       "<p>Saves " + n + " as this order's box count in Salesforce" + (o.inProduction ? "." : ", then it leaves your board.") + "</p></div>" +
       '<button class="x" data-act="close" aria-label="Close">' + ICON.x + "</button></div>" +
       '<div class="fin-sum"><div class="stat"><div class="l">BOXES</div><div class="v">' + n + '</div></div>' +
-      '<div class="stat"><div class="l">GARMENTS BOXED</div><div class="v' + (short ? " warn" : "") + '">' + boxed + " <small>/ " + o.total + "</small></div></div></div>" +
-      (short ? '<div class="fin-warn">The boxes hold ' + boxed + " garments but the order has " + o.total + ". If that's right (misprints, extras), finish anyway. If not, close this and log the missing box.</div>" : "") +
+      '<div class="stat"><div class="l">GARMENTS BOXED</div><div class="v' + (short ? " warn" : "") + '">' + boxed + " <small>/ " + o.total + (split.extra ? " · +" + split.extra + " extra" : "") + "</small></div></div></div>" +
+      (short ? '<div class="fin-warn">The boxes hold ' + boxed + " of the order's garments but the order has " + o.total + (split.extra ? " (plus " + split.extra + " extra)" : "") + ". If that's right (misprints, extras), finish anyway. If not, close this and log the missing box.</div>" : "") +
       '<button class="save ok' + (state.saving ? " busy" : "") + '" data-act="save-fin"' + (state.saving ? " disabled" : "") + ">" +
       (state.saving ? '<span class="spin"></span>SAVING TO SALESFORCE…' : "YES, I'M DONE · " + n + (n === 1 ? " BOX" : " BOXES")) + "</button></div></div>";
   }
@@ -697,10 +699,69 @@
         var q = parseInt(b.cells[cellKey(li, s.size)] || "0", 10) || 0;
         if (q) out.push({ line: li, size: s.size, qty: q });
       });
+      extrasFor(o, b, li).forEach(function (sz) {
+        var q = parseInt(b.cells[cellKey(li, sz)] || "0", 10) || 0;
+        if (q) out.push({ line: li, size: sz, qty: q, extra: true });
+      });
     });
     return out;
   }
   function boxTotal(o, b) { return boxCounts(o, b).reduce(function (a, c) { return a + c.qty; }, 0); }
+
+  /* ---- ADD MORE: extras (Anthony 2026-10-26) ----
+     The supplier sometimes sends extras that get printed and boxed for the customer.
+     "+ ADD MORE" on the box form adds a size that ISN'T on the order to this box; it's
+     saved as e.g. "2XL 3 (extra)". Extras of a size already on the order are just
+     counted in that size, past what's left. Extras are shown apart from the order's
+     own count everywhere ("300 of 300 boxed + 6 extra"). */
+  var EXTRA_PICKS = ["YXS", "YS", "YM", "YL", "YXL", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "OSFA"];
+  function cleanExtraSize(v) {
+    v = String(v == null ? "" : v).toUpperCase().replace(/\s+/g, " ").trim();
+    return /^[A-Z0-9][A-Z0-9 \/.-]{0,9}$/.test(v) ? v : "";
+  }
+  function sizeOnLine(l, size) {
+    var u = String(size).toUpperCase();
+    return l.sizes.filter(function (s) { return s.size.toUpperCase() === u; })[0] || null;
+  }
+  /** Extra sizes for garment line li: ones already boxed on this order, then ones added in this form. */
+  function extrasFor(o, b, li) {
+    var l = o.lines[li], out = [];
+    if (!l) return out;
+    (l.extras || []).forEach(function (e) { if (out.indexOf(e.size) < 0) out.push(e.size); });
+    ((b && b.added && b.added[li]) || []).forEach(function (sz) { if (out.indexOf(sz) < 0) out.push(sz); });
+    return out;
+  }
+  function extraBoxedOf(l, size) {
+    var e = (l.extras || []).filter(function (x) { return x.size === size; })[0];
+    return e ? e.boxed : 0;
+  }
+  /** Garments boxed: { all, extra, ordered } -- ordered = all minus extras (what counts against the order). */
+  function boxedSplit(o) {
+    var all = 0, extra = 0;
+    o.boxes.forEach(function (b) {
+      all += Number(b.qty) || 0;
+      (b.counts || []).forEach(function (c) { if (c.extra) extra += c.qty; });
+    });
+    return { all: all, extra: extra, ordered: all - extra };
+  }
+  function extraNote(n) { return n ? " + " + n + " extra" : ""; }
+  /** Add an extra size to the open box form and select it for counting. */
+  function addExtra(li, raw) {
+    var o = current(), b = state.box; if (!o || !b) return;
+    var l = o.lines[li]; if (!l) return;
+    var size = cleanExtraSize(raw);
+    if (!size) { showToast({ kind: "err", title: "CAN'T USE THAT SIZE", body: "Type a size with letters and numbers, up to 10 characters (for example 6XL)." }); return; }
+    var same = sizeOnLine(l, size);
+    if (same) {
+      b.sel = cellKey(li, same.size); b.adding = null; renderOverlay();
+      showToast({ kind: "ok", title: same.size + " IS ON THE ORDER", body: "Count the extra " + same.size + " in its own size. It can go past what's left." });
+      return;
+    }
+    if (!b.added) b.added = {};
+    if (!b.added[li]) b.added[li] = [];
+    if (extrasFor(o, b, li).indexOf(size) < 0) b.added[li].push(size);
+    b.sel = cellKey(li, size); b.adding = null; renderOverlay();
+  }
 
   /** Garment Type, e.g. "Tees 3" -- the shop word for what's in the box, and the box number. */
   function boxName(o, b) {
@@ -725,7 +786,7 @@
   function boxSheetHtml(o) {
     var b = state.box, total = boxTotal(o, b), ed = b.edit;
     var orig = ed ? ed.orig : {};
-    var boxed = o.boxes.reduce(function (a, x) { return a + x.qty; }, 0);
+    var split = boxedSplit(o), boxed = split.ordered;
     var types = state.boxTypes.length ? state.boxTypes.map(function (t) {
       return '<button class="chip" data-act="box-type" data-v="' + esc(t.value) + '" aria-pressed="' + (b.type === t.value) + '">' + esc(t.label) + "</button>";
     }).join("") : '<div class="hint">Packaging types could not be loaded. Close and try again.</div>';
@@ -737,8 +798,30 @@
         return '<button class="cell' + (q ? " has" : "") + (q > left ? " over" : "") + '" data-act="box-cell" data-k="' + esc(k) + '" aria-pressed="' + (b.sel === k) + '" aria-label="' + esc(s.size) + ", " + q + ' counted">' +
           '<span class="s">' + esc(s.size) + '</span><span class="q">' + (v || "0") + '</span><span class="left">' + Math.max(0, left) + " left</span></button>";
       }).join("");
+      // Extras: sizes not on the order (already boxed on it, or added just now with + ADD MORE).
+      cells += extrasFor(o, b, li).map(function (sz) {
+        var k = cellKey(li, sz), v = b.cells[k] || "", q = parseInt(v || "0", 10) || 0, prior = extraBoxedOf(l, sz) - (orig[k] || 0);
+        lineCount += q;
+        return '<button class="cell extra' + (q ? " has" : "") + '" data-act="box-cell" data-k="' + esc(k) + '" aria-pressed="' + (b.sel === k) + '" aria-label="' + esc(sz) + ", extra, " + q + ' counted">' +
+          '<span class="s">' + esc(sz) + '</span><span class="q">' + (v || "0") + '</span><span class="left">EXTRA' + (prior > 0 ? " · " + prior + " boxed" : "") + "</span></button>";
+      }).join("");
+      var adding = !!(b.adding && b.adding.line === li);
+      cells += '<button class="cell add-more" data-act="add-more" data-i="' + li + '" aria-pressed="' + adding + '" aria-label="Add more: an extra size that isn\'t on the order">' +
+        '<span class="plus">+</span><span class="s">ADD MORE</span><span class="left">EXTRAS</span></button>';
+      var picker = "";
+      if (adding) {
+        var have = extrasFor(o, b, li);
+        var picks = EXTRA_PICKS.filter(function (p) { return !sizeOnLine(l, p) && have.indexOf(p) < 0; }).map(function (p) {
+          return '<button class="chip" data-act="add-size" data-i="' + li + '" data-v="' + esc(p) + '">' + esc(p) + "</button>";
+        }).join("");
+        picker = '<div class="add-panel"><div class="sec-label">ADD AN EXTRA SIZE' + (o.lines.length > 1 ? " · " + esc(l.color || l.product) : "") + ' <span style="color:var(--text-ghost)">· NOT ON THE ORDER</span></div>' +
+          (picks ? '<div class="chips small">' + picks + "</div>" : "") +
+          '<div class="add-other"><input id="extra-size" class="note-in" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Other size, e.g. 6XL" aria-label="Other size" value="' + esc(b.adding.text || "") + '">' +
+          '<button class="chip" data-act="add-other">ADD</button><button class="chip" data-act="add-cancel">CANCEL</button></div>' +
+          '<div class="hint">Pick a size, then type how many on the number pad. Extras of a size that\'s already on the order: just count them in that size.</div></div>';
+      }
       return '<div class="gl"><div class="gl-head">' + esc((l.color ? l.color + " · " : "") + l.product) + "<span>" + (lineCount ? lineCount + " in box" : "") + "</span></div>" +
-        '<div class="cells">' + cells + "</div></div>";
+        '<div class="cells">' + cells + "</div>" + picker + "</div>";
     }).join("");
     if (!o.lines.length) groups = '<div class="hint">This order has no garment sizes in Salesforce, so sizes can\'t be counted. Tell a manager.</div>';
     var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "<"].map(function (k) {
@@ -747,7 +830,9 @@
     }).join("");
     var selParts = b.sel ? b.sel.split("|") : null;
     var selLine = selParts ? o.lines[Number(selParts[0])] : null;
-    var selSize = selLine ? selLine.sizes.filter(function (s) { return s.size === selParts.slice(1).join("|"); })[0] : null;
+    var selName = selParts ? selParts.slice(1).join("|") : "";
+    var selSize = selLine ? selLine.sizes.filter(function (s) { return s.size === selName; })[0] : null;
+    var selExtra = !selSize && selLine && extrasFor(o, b, Number(selParts[0])).indexOf(selName) >= 0;
     var restN = selSize ? Math.max(0, sizeLeft(selSize) + (orig[b.sel] || 0)) : 0;
     var ready = total > 0 && total <= 9999 && !!b.type && (!ed || !!b.word);
     var label = state.saving ? "SAVING TO SALESFORCE…" : !ready ? (!b.type ? "PICK A PACKAGING TYPE" : "COUNT AT LEAST ONE SIZE")
@@ -763,16 +848,16 @@
     return '<div class="scrim"><div class="sheet wide" role="dialog" aria-label="' + (ed ? "Edit a box" : "Log a box") + '">' +
       '<div class="sheet-head"><div class="sheet-title"><h2>' + (ed ? "EDIT BOX “" + esc(ed.name0) + "” · " + esc(o.num) : "LOG BOX " + (o.boxes.length + 1) + " · " + esc(o.num)) + "</h2>" +
       "<p>" + (ed ? "Saved " + esc(fmtWhen(ed.at)) + " · can be changed until " + esc(fmtWhen(ed.until)) + ". Saving changes this box; it doesn't make a new one."
-                  : o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + " saved · " + boxed + " of " + o.total + " garments boxed") + "</p></div>" +
+                  : o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + " saved · " + boxed + " of " + o.total + " garments boxed" + extraNote(split.extra)) + "</p></div>" +
       '<button class="x" data-act="close" aria-label="Close">' + ICON.x + "</button></div>" +
       (ed && !ed.hadSizes ? '<div class="fin-warn">This box was saved without sizes (' + ed.qty0 + " garments). Count its sizes below to save a change.</div>" : "") +
       wordChips +
       '<div><div class="sec-label">' + (ed ? "" : "1 · ") + 'PACKAGING TYPE</div><div class="chips">' + types + "</div></div>" +
       '<div class="row2"><div class="grow"><div class="sec-label">' + (ed ? "" : "2 · ") + 'QUANTITY + SIZE COUNTED <span style="color:var(--text-ghost)">· TAP A SIZE, TYPE THE COUNT</span></div>' + groups + "</div>" +
-      '<div class="pad-wrap"><div class="pad-for">' + (selSize ? "COUNT FOR <b>" + esc(selSize.size) + "</b>" + (o.lines.length > 1 ? " · " + esc(selLine.color || selLine.product) : "") : "TAP A SIZE") + "</div>" +
+      '<div class="pad-wrap"><div class="pad-for">' + (selSize || selExtra ? "COUNT FOR <b>" + esc(selName) + "</b>" + (selExtra ? " · EXTRA" : "") + (o.lines.length > 1 ? " · " + esc(selLine.color || selLine.product) : "") : "TAP A SIZE") + "</div>" +
       '<div class="pad">' + keys + "</div>" +
       '<div class="quick"><button data-act="box-rest"' + (selSize && restN ? "" : " disabled") + ">Rest of " + (selSize ? esc(selSize.size) : "size") + " (" + restN + ")</button>" +
-      '<button data-act="box-next"' + (selSize ? "" : " disabled") + ">Next size →</button></div></div></div>" +
+      '<button data-act="box-next"' + (selSize || selExtra ? "" : " disabled") + ">Next size →</button></div></div></div>" +
       '<div class="total-bar' + (total ? " on" : "") + '"><div><div class="l">TOTAL IN THIS BOX</div><div class="v" aria-live="polite">' + total + "</div></div>" +
       '<div class="gt">Garment Type<b>' + esc(gtName) + "</b></div></div>" +
       (total > 9999 ? '<div class="fin-warn">One box can hold at most 9999 garments.</div>' : "") +
@@ -838,7 +923,7 @@
     var lineChips = o.lines.length > 1 ? '<div><div class="sec-label">GARMENT</div><div class="chips">' + o.lines.map(function (l, i) {
       return '<button class="chip" data-act="mis-line" data-i="' + i + '" aria-pressed="' + (m.line === i) + '">' + esc((l.color ? l.color + " " : "") + l.product) + "</button>";
     }).join("") + "</div></div>" : "";
-    var sizes = line.sizes.map(function (s) {
+    var sizes = line.sizes.concat(line.extras || []).map(function (s) {
       return '<button class="chip size-chip" data-act="mis-size" data-v="' + esc(s.size) + '" aria-pressed="' + (m.size === s.size) + '">' + esc(s.size) + "</button>";
     }).join("");
     var reasons = state.reasons.map(function (r) {
@@ -1138,10 +1223,14 @@
       var b = o.boxes.filter(function (x) { return x.id === el.getAttribute("data-id"); })[0];
       if (!b || !canChangeBox(withWindow(b))) { showToast({ kind: "err", title: "REVIEW PERIOD ENDED", body: "This box is past its 7-day review period, so it can't be changed." }); return; }
       var cells = {}, orig = {};
-      (b.counts || []).forEach(function (c) { var k = cellKey(c.line, c.size); cells[k] = String(c.qty); orig[k] = c.qty; });
+      var added = {};
+      (b.counts || []).forEach(function (c) {
+        var k = cellKey(c.line, c.size); cells[k] = String(c.qty); orig[k] = c.qty;
+        if (c.extra) { (added[c.line] = added[c.line] || []).push(c.size); }
+      });
       var first = (b.counts && b.counts[0]) ? cellKey(b.counts[0].line, b.counts[0].size) : (o.lines[0] && o.lines[0].sizes[0] ? cellKey(0, o.lines[0].sizes[0].size) : null);
       var word0 = garmentWordOf(b.name), num = (String(b.name).match(/\s(\d+)$/) || [])[1] || "";
-      state.box = { type: b.type, cells: cells, sel: first, requestId: newRequestId(), word: word0,
+      state.box = { type: b.type, cells: cells, sel: first, requestId: newRequestId(), word: word0, added: added,
         edit: { boxId: b.id, name0: b.name, word0: word0, num: num, at: b.at, until: b.editableUntil, orig: orig, hadSizes: !!(b.counts && b.counts.length), qty0: b.qty } };
       state.sheet = "box"; state.toast = null; renderToast(); renderOverlay();
     },
@@ -1178,6 +1267,19 @@
     close: function () { if (state.saving) return; state.sheet = null; renderOverlay(); },
     "box-type": function (el) { state.box.type = el.getAttribute("data-v"); renderOverlay(); },
     "box-cell": function (el) { state.box.sel = el.getAttribute("data-k"); renderOverlay(); },
+    "add-more": function (el) {
+      var b = state.box; if (!b) return;
+      var li = Number(el.getAttribute("data-i"));
+      b.adding = b.adding && b.adding.line === li ? null : { line: li, text: "" };
+      renderOverlay();
+    },
+    "add-size": function (el) { addExtra(Number(el.getAttribute("data-i")), el.getAttribute("data-v")); },
+    "add-other": function () {
+      var b = state.box; if (!b || !b.adding) return;
+      var inp = document.getElementById("extra-size");
+      addExtra(b.adding.line, inp ? inp.value : b.adding.text);
+    },
+    "add-cancel": function () { if (state.box) { state.box.adding = null; renderOverlay(); } },
     "box-key": function (el) {
       var b = state.box; if (!b.sel) return;
       var k = el.getAttribute("data-k"), v = b.cells[b.sel] || "";
@@ -1194,7 +1296,10 @@
     "box-next": function () {
       var o = current(), b = state.box; if (!o || !b.sel) return;
       var all = [];
-      o.lines.forEach(function (l, li) { l.sizes.forEach(function (s) { all.push(cellKey(li, s.size)); }); });
+      o.lines.forEach(function (l, li) {
+        l.sizes.forEach(function (s) { all.push(cellKey(li, s.size)); });
+        extrasFor(o, b, li).forEach(function (sz) { all.push(cellKey(li, sz)); });
+      });
       var i = all.indexOf(b.sel); b.sel = all[(i + 1) % all.length]; renderOverlay();
     },
     "save-box": function () { saveBox(false); },
@@ -1259,6 +1364,7 @@
   });
   document.addEventListener("input", function (e) {
     if (e.target && e.target.id === "mis-note" && state.mis) state.mis.note = e.target.value.slice(0, 80);
+    if (e.target && e.target.id === "extra-size" && state.box && state.box.adding) state.box.adding.text = e.target.value.slice(0, 10);
     if (e.target && e.target.id === "order-search") { state.q = e.target.value.slice(0, 60); applySearch(); }
   });
   // Leaving the search box: catch up on any refresh that waited while typing; "Done" closes the keyboard.
@@ -1267,6 +1373,7 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.target && e.target.id === "order-search" && e.key === "Enter") { e.preventDefault(); e.target.blur(); }
+    if (e.target && e.target.id === "extra-size" && e.key === "Enter" && state.box && state.box.adding) { e.preventDefault(); addExtra(state.box.adding.line, e.target.value); }
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; renderOverlay(); }

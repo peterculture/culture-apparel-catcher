@@ -364,3 +364,18 @@ html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-conten
   border-left: 3px solid var(--ca-season-accent, #91897B); border-radius: 100px; padding: .55rem .9rem; }
 
 @media print { .ca-season-fx { display: none !important; } }
+
+/* ---- ADD MORE: extras not on the order (2026-10-26) ---- */
+.cell.extra { border-style: dashed; border-color: var(--warn); }
+.cell.extra .left { color: var(--warn-soft); }
+.cell.extra.has { background: var(--warn-bg); }
+.cell.extra[aria-pressed="true"] { border-style: solid; }
+.cell.add-more { border-style: dashed; border-color: var(--border-strong); background: transparent; }
+.cell.add-more .plus { font: 700 1.9rem/1 'Oswald'; color: var(--warn-soft); }
+.cell.add-more .s { color: var(--text-secondary); }
+.cell.add-more[aria-pressed="true"] { border-color: var(--warn); background: var(--warn-bg); box-shadow: none; }
+.add-panel { margin-top: .7rem; padding: .9rem 1rem; border-radius: .9rem; border: 1px dashed var(--warn); background: var(--warn-bg); display: flex; flex-direction: column; gap: .7rem; }
+.add-other { display: flex; gap: .5rem; align-items: stretch; flex-wrap: wrap; }
+.add-other .note-in { flex: 1; min-width: 9rem; text-transform: uppercase; }
+.size.extra { border: 1px dashed var(--warn); background: var(--warn-bg); }
+.size.extra .s { color: var(--warn-soft); }
