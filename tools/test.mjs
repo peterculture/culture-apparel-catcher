@@ -505,6 +505,64 @@ await test("Log a box by size: total added up by the app, both fields saved", as
   ok(r.status === 201 && old.Packaging_Quantity__c === 12 && !("Quantity_Size_Counted__c" in old), "an older tablet sending only a total still works");
 });
 
+await test("Add More: extras of a size not on the order", async () => {
+  // written and read back
+  const one = [{ product: "Gildan 5000 Tee", color: "Navy", sizes: [{ size: "S" }, { size: "M" }] }];
+  let b = sizes.buildBreakdown(one, [{ line: 0, size: "2XL", qty: 3, extra: true }, { line: 0, size: "S", qty: 8 }]);
+  ok(b.text === "S 8 · 2XL 3 (extra) = 11" && b.total === 11, "extra written after the order's sizes -> " + b.text);
+  const back = sizes.parseBreakdown(one, b.text);
+  ok(back.length === 2 && back[1].extra === true && back[1].size === "2XL" && !back[0].extra, "reads back with the extra marked");
+  ok(sizes.parseBreakdown(one, "S 8 · 2XL 3 = 11").length === 0, "an unmarked size not on the order still isn't guessed at");
+  const two = [{ product: "Comfort Colors 1717", color: "Blue Spruce", sizes: [{ size: "S" }] }, { product: "Comfort Colors 3023CL", color: "Ivory", sizes: [{ size: "L" }] }];
+  b = sizes.buildBreakdown(two, [{ line: 1, size: "XL", qty: 2, extra: true }, { line: 0, size: "S", qty: 5 }]);
+  ok(b.text === "Blue Spruce Comfort Colors 1717: S 5 | Ivory Comfort Colors 3023CL: XL 2 (extra) = 7", "mixed box with an extra -> " + b.text);
+  ok(sizes.parseBreakdown(two, b.text).filter((c) => c.extra).length === 1, "mixed box extra reads back");
+
+  // saved through the app
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const O = "801000000000001AAA";
+  const post = (counts, id, name = "Tees 2") => boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: O, type: "Standard Culture Box", name, counts, requestId: id }, cookie), env });
+  let r = await post([{ line: 0, size: "M", qty: 20 }, { line: 0, size: "2xl ", qty: 3, extra: true }], "req-xtra0001");
+  let d = await r.json();
+  const saved = JSON.parse(posts("/sobjects/Order_Packaging__c").pop().body);
+  ok(r.status === 201 && saved.Packaging_Quantity__c === 23, "box total includes the extras (23)");
+  ok(saved.Quantity_Size_Counted__c === "M 20 · 2XL 3 (extra) = 23", "size breakdown marks the extra: " + saved.Quantity_Size_Counted__c);
+  ok(d.box.counts.some((c) => c.extra && c.size === "2XL"), "answer carries the extra (typed '2xl ' cleaned to '2XL')");
+  r = await post([{ line: 0, size: "<b>", qty: 2, extra: true }], "req-xtra0002");
+  ok(r.status === 400, "a junk extra size is refused");
+  r = await post([{ line: 0, size: "5XL", qty: 2 }], "req-xtra0003");
+  ok(r.status === 400, "a size not on the order WITHOUT extra is still refused");
+  r = await post([{ line: 0, size: "m", qty: 4, extra: true }], "req-xtra0004", "Tees 3");
+  const s2 = JSON.parse(posts("/sobjects/Order_Packaging__c").pop().body);
+  ok(r.status === 201 && s2.Quantity_Size_Counted__c === "M 4 = 4", "an 'extra' that IS on the order is counted in that size: " + s2.Quantity_Size_Counted__c);
+  r = await post([{ line: 0, size: "2XL", qty: 1, extra: true }, { line: 0, size: "2xl", qty: 1, extra: true }], "req-xtra0005");
+  ok(r.status === 400, "the same extra size twice is refused");
+  r = await post([{ line: 5, size: "2XL", qty: 1, extra: true }], "req-xtra0006");
+  ok(r.status === 400, "an extra on a garment that isn't on the order is refused");
+
+  const l = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders[0];
+  const sz = Object.fromEntries(l.lines[0].sizes.map((x) => [x.size, x.boxed]));
+  ok(sz.M === 24, "extras don't count against the order's sizes (M boxed 24)");
+  ok(l.lines[0].extras.length === 1 && l.lines[0].extras[0].size === "2XL" && l.lines[0].extras[0].boxed === 3, "order shows 2XL extra boxed: 3");
+  ok(l.extraBoxed === 3, "order's extraBoxed = 3");
+
+  // duplicate copies the extra exactly; edit keeps / changes it
+  // (the pretend Salesforce gives new boxes short ids; give this one a real 18-character id)
+  db.boxes.find((x) => x.Name === "Tees 2").Id = "a0X00000000000XAAA";
+  const src = { id: "a0X00000000000XAAA" };
+  r = await dup.onRequestPost({ request: req("POST", "/api/duplicate-box", { orderId: O, boxId: src.id, count: 2, requestId: "req-xtra0007" }, cookie), env });
+  ok(r.status === 201 && db.boxes.filter((x) => x.Quantity_Size_Counted__c === "M 20 · 2XL 3 (extra) = 23").length === 3, "duplicates copy the extra");
+  db.boxes.forEach((x) => { if (x.Id === src.id) x.LastModifiedDate = x.CreatedDate; });
+  r = await bedit.onRequestPost({ request: req("POST", "/api/box-edit", { orderId: O, boxId: src.id, type: "Standard Culture Box", word: "Tees",
+    counts: [{ line: 0, size: "M", qty: 20 }, { line: 0, size: "2XL", qty: 5, extra: true }, { line: 0, size: "3XL", qty: 1, extra: true }], requestId: "req-xtra0008" }, cookie), env });
+  const ed = db.boxes.find((x) => x.Id === src.id);
+  ok(r.status === 200 && ed.Quantity_Size_Counted__c === "M 20 · 2XL 5 (extra) · 3XL 1 (extra) = 26" && ed.Packaging_Quantity__c === 26, "edit changes extras: " + ed.Quantity_Size_Counted__c);
+
+  // a misprint on an extra size is accepted
+  r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: O, qty: 1, size: "2XL", garment: "Navy Gildan 5000 Tee", reason: "Stained", requestId: "req-xtra0009" }, cookie), env });
+  ok(r.status === 200, "misprint on an extra size (2XL) is accepted");
+});
+
 await test("Mixed box: two garments from the order in one box", async () => {
   reset(); const env = ENV(); const cookie = await signIn(env);
   db.items.push({ OrderId: "801000000000001AAA", Size__c: "XL", Color__c: "Ivory", Quantity: 10, Product2: { Name: "Comfort Colors 3023CL" } });
