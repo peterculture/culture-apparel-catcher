@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Tab + app icons (Culture Apparel mark, 2026-10-26) -->
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<meta name="theme-color" content="#85302D">
+<meta name="apple-mobile-web-app-title" content="CA Production">
+<script>
+/* Self-hosted React (E4.4, 2026-08-31). support.js loads React and ReactDOM
+   from unpkg.com; unpkg being down or blocked made every board a white page,
+   with no fallback and nothing in the app's control.
+
+   support.js is GENERATED and must not be hand-edited, and dc-runtime/ is not
+   in this repo -- but it does not need editing. Its cdnScriptFor() checks
+   window.__resources[url] first and uses that value when it is a non-empty
+   string, so this map redirects both files to ./vendor/ copies with no change
+   to the generated file. Must run BEFORE support.js below.
+
+   The vendor files are byte-identical to what unpkg served: both were verified
+   against the SRI hashes support.js already pins. Note the override path drops
+   the integrity attribute (cdnScriptFor returns {src} only) -- acceptable
+   because these are now same-origin and travel under the same TLS and
+   Cloudflare Access boundary as the page itself.
+
+   Babel is deliberately NOT self-hosted: support.js only fetches it for
+   `jsx` script blocks and no page has one (every block is type="text/x-dc"),
+   so it is never requested. Add it here if a JSX page is ever introduced. */
+window.__resources = Object.assign({}, window.__resources, {
+  "https://unpkg.com/react@18.3.1/umd/react.production.min.js": "./vendor/react-18.3.1.production.min.js",
+  "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js": "./vendor/react-dom-18.3.1.production.min.js"
+});
+</script>
+<link rel="stylesheet" href="./tokens.css">
+<script src="./support.js"></script>
+<script src="./ca-api.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css" rel="stylesheet">
+  <style>
+    body{margin:0;background:#3a3a3d;font-family:'Archivo',system-ui,sans-serif;color:#141210}
+    doc-page:not(:defined){visibility:hidden}
+  </style>
+</helmet>
+
+<sc-if value="{{showLoading}}" hint-placeholder-val="{{ false }}">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;font:400 15px/1 'Archivo';color:#c9c2b6">Loading order sheet…</div>
+</sc-if>
+
+<sc-if value="{{showError}}" hint-placeholder-val="{{ false }}">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px">
+    <div style="max-width:520px;background:#fff;border-radius:14px;border-top:6px solid #C6372B;padding:30px 32px;box-shadow:0 24px 60px -24px rgba(0,0,0,.5)">
+      <div style="display:flex;align-items:center;gap:10px;font:700 11px/1 'Oswald';letter-spacing:.16em;text-transform:uppercase;color:#C6372B;margin-bottom:14px"><i class="ti ti-alert-triangle" style="font-size:16px"></i>Nothing to print</div>
+      <div style="font:700 22px/1.25 'Oswald';color:#141210">{{errorTitle}}</div>
+      <div style="font:400 14px/1.6 'Archivo';color:#4a453d;margin-top:12px">{{errorDetail}}</div>
+      <div style="font:400 12px/1.6 'Archivo';color:#8a8378;margin-top:18px;padding-top:16px;border-top:1px solid #e2ddd4">This page shows nothing rather than risk putting invented numbers on the press. Nothing here is printable until a real order loads.</div>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{showSheet}}" hint-placeholder-val="{{ true }}">
+<sc-if value="{{isDemo}}" hint-placeholder-val="{{ false }}">
+  <div style="background:#C6372B;color:#fff;font:700 12px/1 'Oswald';letter-spacing:.14em;text-transform:uppercase;text-align:center;padding:11px">Sample layout · ?demo=1 · not a real order</div>
+</sc-if>
+<x-import component-from-global-scope="doc-page" from="./doc-page.js" size="letter" margin="0.55in" hint-size="100%,100%">
+
+  <div slot="header" style="display:flex;align-items:center;gap:11px;padding:10px 0 12px;border-bottom:2px solid #C6372B;margin-bottom:4px">
+    <svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true"><g fill="#C6372B"><rect x="12" y="9" width="24" height="3.1" rx="1.5"/><rect x="8" y="14" width="32" height="3.1" rx="1.5"/><rect x="5" y="19" width="38" height="3.1" rx="1.5"/><rect x="5" y="24" width="38" height="3.1" rx="1.5"/><rect x="6" y="29" width="36" height="3.1" rx="1.5"/><rect x="9" y="34" width="30" height="3.1" rx="1.5"/><rect x="13" y="39" width="22" height="3.1" rx="1.5"/></g></svg>
+    <div style="font:700 13px/1 'Oswald';letter-spacing:.14em;color:#141210">CULTURE APPAREL</div>
+    <div style="margin-left:auto;font:600 11px/1 'Oswald';letter-spacing:.16em;text-transform:uppercase;color:#6b645c">Production Order Sheet</div>
+  </div>
+
+  <!-- ONE PAGE, ALWAYS (Anthony, 10-14). Everything between the running header
+       and footer sits in these two boxes so the print-fit script at the bottom
+       can shrink it, evenly, until it fits one letter page. #os-fit is the box
+       that gets zoomed; #os-fit-outer is never zoomed, so its height is the
+       true printed height. -->
+  <div id="os-fit-outer"><div id="os-fit">
+  <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:22px">
+    <div style="flex:1;min-width:0">
+      <div style="font:600 12px/1 'Oswald';letter-spacing:.2em;text-transform:uppercase;color:#C6372B;margin-bottom:8px">Order {{goa}}</div>
+      <div style="font:700 32px/1 'Oswald';letter-spacing:.01em;color:#141210">{{customer}}</div>
+      <div style="font:400 14px/1.3 'Archivo';color:#6b645c;margin-top:7px">{{account}} · Salesforce #{{orderNumber}}</div>
+    </div>
+    <div style="border:2px solid #141210;border-radius:8px;padding:9px 15px;text-align:center;flex-shrink:0">
+      <div style="font:600 9px/1 'Oswald';letter-spacing:.14em;text-transform:uppercase;color:#6b645c;margin-bottom:6px">GOA</div>
+      <div style="font:700 22px/1 'Oswald';color:#C6372B">{{goaTail}}</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1.5px solid #141210;border-radius:8px;overflow:hidden;margin-bottom:24px">
+    <div style="padding:12px 14px;border-right:1px solid #d8d1c7">
+      <div style="font:600 9px/1 'Oswald';letter-spacing:.12em;text-transform:uppercase;color:#6b645c;margin-bottom:8px">Decoration</div>
+      <div style="display:inline-flex;align-items:center;gap:7px;font:600 14px/1 'Oswald';color:#141210"><span style="width:9px;height:9px;border-radius:50%;background:{{methodColor}}"></span>{{methodLabel}}</div>
+    </div>
+    <div style="padding:12px 14px;border-right:1px solid #d8d1c7">
+      <div style="font:600 9px/1 'Oswald';letter-spacing:.12em;text-transform:uppercase;color:#6b645c;margin-bottom:8px">Print Date</div>
+      <div style="font:600 14px/1 'Oswald';color:#141210">{{printDate}}</div>
+    </div>
+    <div style="padding:12px 14px">
+      <div style="font:600 9px/1 'Oswald';letter-spacing:.12em;text-transform:uppercase;color:#6b645c;margin-bottom:8px">Quantity</div>
+      <div style="font:600 14px/1 'Oswald';color:#141210">{{qty}} pieces</div>
+    </div>
+  </div>
+
+  <!-- 2026-10-20 (Anthony): mockup MUCH bigger -- full page width -- and Print Details
+       moved to a strip underneath it. The Decorations section (with its Art Spec
+       print recipes) was removed at the same time, on purpose. -->
+  <div id="os-mockup" style="margin-bottom:14px;break-inside:avoid">
+    <sc-if value="{{hasMockup}}" hint-placeholder-val="{{ false }}">{{mockupNode}}</sc-if>
+    <sc-if value="{{noMockup}}" hint-placeholder-val="{{ true }}"><div style="width:100%;height:420px;box-sizing:border-box;border:1.5px solid #141210;border-radius:8px;background-image:repeating-linear-gradient(45deg,#efeae2 0 11px,#f7f3ec 11px 22px);display:flex;align-items:center;justify-content:center;font:500 12px/1.4 ui-monospace,monospace;letter-spacing:.18em;color:#a79f92;text-transform:uppercase;text-align:center">Production<br>Mockup</div></sc-if>
+  </div>
+  <div style="font:600 11px/1 'Oswald';letter-spacing:.14em;text-transform:uppercase;color:#6b645c;margin-bottom:10px">Print Details</div>
+  <div style="display:grid;grid-template-columns:1fr 1.6fr 1fr;border:1.5px solid #141210;border-radius:8px;overflow:hidden;margin-bottom:26px;break-inside:avoid">
+    <div style="padding:12px 14px;border-right:1px solid #d8d1c7;min-width:0">
+      <div style="font:600 9px/1 'Oswald';letter-spacing:.12em;text-transform:uppercase;color:#6b645c;margin-bottom:8px">Placement</div>
+      <div style="font:400 13px/1.35 'Archivo';color:#141210">{{placement}}</div>
+    </div>
+    <div style="padding:12px 14px;border-right:1px solid #d8d1c7;min-width:0">
+      <div style="font:600 9px/1 'Oswald';letter-spacing:.12em;text-transform:uppercase;color:#6b645c;margin-bottom:8px">Ink Colors</div>
+      <div style="font:400 13px/1.35 'Archivo';color:#141210">{{inkColors}}</div>
+      <sc-if value="{{hasScreens}}" hint-placeholder-val="{{ false }}"><div style="margin-top:8px;font:600 12px/1.35 'Oswald';letter-spacing:.03em;color:#141210">{{screensLine}}</div></sc-if>
+    </div>
+    <div style="padding:12px 14px;min-width:0">
+      <div style="font:600 9px/1 'Oswald';letter-spacing:.12em;text-transform:uppercase;color:#6b645c;margin-bottom:8px">Total Garments</div>
+      <div style="font:400 13px/1.35 'Archivo';color:#141210">{{totalGarments}}</div>
+    </div>
+  </div>
+
+  <div style="font:600 12px/1 'Oswald';letter-spacing:.16em;text-transform:uppercase;color:#141210;margin-bottom:14px">Garment Size Breakdown</div>
+
+  <sc-for list="{{grids}}" as="g" hint-placeholder-count="2">
+    <div style="margin-bottom:16px;break-inside:avoid">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font:700 11px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;border:1.5px solid #141210;border-radius:100px;padding:5px 12px;color:{{g.tagColor}};background:{{g.tagBg}}">{{g.colorLabel}}</span><span style="font:400 12px/1 'Archivo';color:#6b645c">{{g.garment}}</span></div>
+      <!-- CSS table, NOT a <table>. This is not a style preference (E4.6).
+           The HTML parser only allows table-related elements inside <table>,
+           so a <sc-for> written between <tr> and <th> is FOSTER-PARENTED out
+           of the table before any script runs. dc-runtime adopts the template
+           from the live DOM (parseDcDocument -> dc.innerHTML in support.js),
+           so what it compiled was a table with the loops removed: this grid
+           printed with no size columns and no per-size quantities, just "Qty"
+           and a grand total. Measured on the raw source vs the parsed DOM:
+           2 <sc-for> inside <table> became 0.
+
+           support.js DOES have a repair for this -- it refetches the page as
+           raw text and re-parses the unmangled template -- but that path is
+           gated on `if (!window.__resources)`, and E4.4 set window.__resources
+           on every page to self-host React. So the repair has been dead since
+           2026-08-31 and cannot be relied on again.
+
+           display:table/table-row/table-cell lays out identically and the
+           parser leaves custom elements alone, because none of this is a
+           <table>. sc-for renders as a React Fragment (walkFor in support.js),
+           so its children land as direct children of the row -- no anonymous
+           cell box, no layout change.
+
+           text-align:center and vertical-align:middle are spelled out where
+           the old <th>/<td> got them from the UA stylesheet for free; a div
+           does not. -->
+      <div style="width:100%;display:table;border-collapse:collapse">
+        <div style="display:table-row">
+          <div style="display:table-cell;vertical-align:middle;border:1.5px solid #141210;width:64px;text-align:left;padding:8px 10px;font:700 10px/1 'Oswald';background:#f2ede6"></div>
+          <sc-for list="{{cols}}" as="c" hint-placeholder-count="5">
+            <div style="display:table-cell;vertical-align:middle;border:1.5px solid #141210;padding:8px 4px;text-align:center;font:700 12px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#6b645c;background:#f2ede6">{{c}}</div>
+          </sc-for>
+          <div style="display:table-cell;vertical-align:middle;border:1.5px solid #141210;padding:8px 4px;text-align:center;font:700 12px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#fff;background:#141210">Total</div>
+        </div>
+        <div style="display:table-row">
+          <div style="display:table-cell;vertical-align:middle;border:1.5px solid #141210;padding:10px;font:700 11px/1 'Oswald';letter-spacing:.12em;text-transform:uppercase;color:#6b645c;text-align:left">Qty</div>
+          <sc-for list="{{g.cells}}" as="cell" hint-placeholder-count="5">
+            <div style="display:table-cell;vertical-align:middle;border:1.5px solid #141210;text-align:center;padding:12px 4px;font-family:'Archivo';font-size:22px;font-weight:{{cell.weight}};color:{{cell.color}}">{{cell.qty}}</div>
+          </sc-for>
+          <div style="display:table-cell;vertical-align:middle;border:1.5px solid #141210;text-align:center;font:700 22px/1 'Archivo';padding:12px 4px;background:#141210;color:#fff">{{g.total}}</div>
+        </div>
+      </div>
+    </div>
+  </sc-for>
+
+  <div style="display:flex;align-items:center;border-top:3px solid #141210;padding-top:14px;margin:10px 0 26px">
+    <div style="font:700 13px/1 'Oswald';letter-spacing:.16em;text-transform:uppercase;color:#6b645c">Grand Total</div>
+    <div style="margin-left:auto;font:700 30px/1 'Oswald';color:#141210">{{grand}} <span style="font:500 14px/1 'Archivo';color:#6b645c">pieces</span></div>
+  </div>
+
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;break-inside:avoid">
+    <div>
+      <div style="font:600 11px/1 'Oswald';letter-spacing:.14em;text-transform:uppercase;color:#6b645c;margin-bottom:10px">Production Notes</div>
+      <div style="border:1.5px solid #d8d1c7;border-radius:8px;padding:14px 16px;font:400 13px/1.6 'Archivo';color:#141210;min-height:70px">{{notes}}</div>
+    </div>
+    <div>
+      <div style="font:600 11px/1 'Oswald';letter-spacing:.14em;text-transform:uppercase;color:#6b645c;margin-bottom:10px">Print Specifications</div>
+      <div style="border:1.5px solid #d8d1c7;border-radius:8px;padding:14px 16px;font:400 13px/1.6 'Archivo';color:#141210;min-height:70px">{{specs}}</div>
+    </div>
+  </div>
+  </div></div><!-- /#os-fit, /#os-fit-outer -->
+
+  <div slot="footer" style="display:flex;align-items:center;padding-top:10px;border-top:1px solid #d8d1c7;font:400 10px/1 'Archivo';color:#a79f92">
+    <span>Culture Apparel · Production</span>
+    <span style="margin-left:auto">{{goa}} · {{footNote}}</span>
+  </div>
+
+</x-import>
+</sc-if>
+
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#141210"/><text x="50" y="58" font-family="Oswald,Arial" font-size="28" font-weight="700" fill="#fff" text-anchor="middle" letter-spacing="2">CA</text><text x="50" y="76" font-family="Arial" font-size="7" font-weight="700" fill="#C6372B" text-anchor="middle" letter-spacing="1">ORDER SHEET</text></svg></template></x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+/* AU-25 (10-14): one order, possibly returned by both boards' endpoints. */
+function mergeOrderCopies(copies){
+  if(!copies.length) return null;
+  const out = Object.assign({}, copies[0]);
+  for(const c of copies.slice(1)){
+    for(const k of Object.keys(c)){
+      if(k==='ProductionMethods') continue;
+      if(out[k]==null || out[k]==='') out[k]=c[k];
+    }
+  }
+  const seen = new Set(), methods = [];
+  for(const c of copies){
+    for(const pm of (c.ProductionMethods||[])){
+      const key = (pm && pm.Id) || JSON.stringify(pm);
+      if(seen.has(key)) continue;
+      seen.add(key); methods.push(pm);
+    }
+  }
+  out.ProductionMethods = methods;
+  return out;
+}
+
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    /* The sample order below is a LAYOUT FIXTURE, not a fallback. It used to
+       render on first paint and simply stay there whenever hydrate() failed --
+       a complete, printable, entirely fictional order sheet for "Cypress Trail
+       10K", with a footer line as the only tell. This is the document the floor
+       prints and cuts screens from, so that failure mode is not acceptable.
+
+       `status` now decides what is on screen, and the sheet renders for exactly
+       two of its four values:
+         'loading' - an orderId was given, the fetch is in flight  -> spinner
+         'live'    - the real order resolved                       -> sheet
+         'demo'    - ?demo=1 was passed explicitly                 -> sheet
+         'error'   - anything else, naming what went wrong         -> error card
+       There is no path from a failed load back to the sample: reaching 'demo'
+       requires typing ?demo=1 into the URL. */
+    this.state = {
+      status:'loading', errorTitle:'', errorDetail:'', orderId:'',
+      order:{
+        goa:'GOA-4809', goaTail:'4809', customer:'Cypress Trail 10K', account:'Cypress Events', orderNumber:'00043891',
+        method:'sp', printDate:'Tue · Jul 21', qty:'300',
+        placement:'Full Front, Left Chest, Back',
+        inkColors:'PMS 186 Red, PMS 123 Gold, White',
+        totalGarments:'300 pieces',
+        notes:'Run heather first, black second — reclaim gold screen between. Customer approved bright red over PMS match. Fold + poly-bag by size; box in cartons of 50. Event pickup Fri AM — must ship Thursday.',
+        specs:'160 mesh, waterbased ink, cure 320°F for 60s. Confirm placement against customer proof before pulling screens. Reclaim between colorways.',
+        methods:[
+          { id:'demo-m1', type:'Screen Print', color:'var(--method-sp)', placementLabel:'Full Front + Left Chest', status:'Ready for Print' },
+          { id:'demo-m2', type:'Screen Print', color:'var(--method-sp)', placementLabel:'Back', status:'Ready for Print' },
+        ],
+        cols:['S','M','L','XL','2XL'],
+        grids:[
+          { colorLabel:'Heather Gray', dark:false, garment:'Next Level 3600', qtys:{ S:48, M:72, L:72, XL:36, '2XL':12 }, total:240 },
+          { colorLabel:'Black', dark:true, garment:'Next Level 3600', qtys:{ S:12, M:18, L:18, XL:9, '2XL':3 }, total:60 },
+        ],
+        grand:'300',
+      },
+    };
+  }
+  componentDidMount(){
+    let orderId='', demo=false;
+    try {
+      const qs=new URLSearchParams(location.search);
+      orderId=qs.get('orderId')||'';
+      demo=qs.get('demo')==='1';
+    } catch(_){}
+    // Explicit opt-in only. Nothing in the app links here with ?demo=1.
+    if(demo){ this.setState({status:'demo', orderId:orderId||'sample'}); return; }
+    if(!orderId){
+      this.fail('No order was requested', 'This page needs an ?orderId= in its address. Open the order sheet from a board rather than typing the address by hand.');
+      return;
+    }
+    this.setState({status:'loading', orderId});
+    this.hydrate(orderId);
+  }
+  /* One place to land on the error card. Deliberately takes a human title and a
+     detail line -- "could not load" on its own sends a worker to find someone
+     with no idea what to tell them. */
+  fail(title, detail){
+    this.setState({ status:'error', errorTitle:title, errorDetail:detail });
+  }
+  async hydrate(orderId){
+    try {
+      const api = window.CAApi;
+      if(!api){ this.fail('The page did not load correctly', 'ca-api.js is missing, so this sheet cannot be built. Reload the page; if it happens again the deployment is broken.'); return; }
+      const M = { sp:'Screen Print', em:'Embroidery', hp:'Heat Press' };
+      /* #11 (2026-09-30). The three .catch(()=>[]) below used to turn a FAILED
+         load into an EMPTY one, and the page could not tell them apart: an
+         unreachable Salesforce read as "this order is Complete or has no
+         decoration", and a failed item load printed the sheet with no ink
+         colours and no warning. Each failure is now remembered (`missed`) so
+         the page can say "could not load" when that is what happened. */
+      const missed = {};
+      const soft = (key, p) => p.catch(e => { missed[key] = e || true; return []; });
+      const [o1, o2, rows, items, artSpecs] = await Promise.all([ soft('orders', api.getOrders()), soft('orders', api.getProductionOrders?api.getProductionOrders():Promise.resolve([])), api.getOrderSizes(orderId), soft('items', api.getPreProductionItems(orderId)), (api.getArtSpecs?api.getArtSpecs(orderId):Promise.resolve(null)) ]);
+      /* AU-25 (10-14): the order can be in BOTH lists -- /api/orders carries its
+         Pre-Production decorations, /api/production-orders the ones on press or
+         later. Taking the first match printed a sheet with only the prep-stage
+         decorations (front in prep + back on press -> no back on the sheet).
+         Now every copy is merged: decorations unioned by Id, and any order-level
+         value blank in one copy filled from the other. */
+      const rec = mergeOrderCopies(o1.concat(o2).filter(r => r && r.Id === orderId));
+      /* Missing AND an order list failed: we do not know where the order is, so
+         say the load failed -- never guess "Complete". */
+      if(!rec && missed.orders){
+        const why = api.errText ? api.errText(missed.orders) : '';
+        this.fail('Order ' + orderId + ' could not be loaded',
+                  'Salesforce did not return the order lists' + (why ? ' (' + why + ')' : '') + '. Nothing is known to be wrong with the order itself. Check the connection and reload; do not print this sheet until it shows real data.');
+        return;
+      }
+      /* Not an error in Salesforce -- both queries succeeded, this order just
+         isn't in either result. The usual causes are an order marked Complete
+         (the boards' queries drop it) or one with no decoration yet, so
+         say that rather than "not found", which reads as "deleted". */
+      if(!rec){
+        this.fail('Order ' + orderId + ' could not be found',
+                  'The order loaded no data from Salesforce. That usually means it is marked Complete, or it has no decoration set up yet. Check it on the board before printing anything.');
+        return;
+      }
+      /* One row per GARMENT + COLOUR, via sizeGrid() in ca-api.js (E1.5).
+         This used to group by colour alone and label the row with whichever
+         garment arrived first, so black tees and black hoodies on the same
+         order collapsed into a single row: the hoodies vanished from the sheet
+         entirely and the press was told to run 65 of a garment only 50 of
+         which existed. On the one page whose whole job is telling the press
+         what to pull. The helper is shared with the calendar drawer so the two
+         cannot drift; it also sorts the rows, which this did not -- there is no
+         ORDER BY on /api/order-sizes, so the same order could print its rows in
+         a different arrangement on a different day. */
+      const grid = api.sizeGrid(rows);
+      const cols = grid.cols, grids = grid.groups, grand = grid.grand;
+      const pdDate = api.parseSfDate(rec.Print_Date__c);
+      const pd = pdDate ? pdDate.toLocaleDateString([], { weekday:'short', month:'short', day:'numeric' }) : '—';
+      // Placement: every decoration location across every Production_Method__c
+      // on this order (Front / Back / Right Sleeve / etc, from Placements__c),
+      // deduped -- an order with two locations for the same method (or two
+      // different methods) still lists every location once.
+      const placements = Array.from(new Set(
+        (rec.ProductionMethods || []).flatMap(pm => (pm.Placements && pm.Placements.length) ? pm.Placements : (pm.Placement__c ? [pm.Placement__c] : []))
+      ));
+      // Ink Colors: pulled from this order's Pre_Production_Item__c Ink items'
+      // Pantone_Color__c, deduped -- these are the actual mixed colors, not
+      // the garment colors (that's what the old "Colors" row accidentally
+      // showed, via the size-breakdown grouping above).
+      const inkColors = Array.from(new Set(
+        (items || []).filter(it => it.Type__c === 'Ink' && it.Pantone_Color__c).map(it => it.Pantone_Color__c)
+      ));
+      // Every Production_Method__c linked to this order (not just the single
+      // guessed Method chip in the summary bar above, which infers ONE method
+      // from Printer__r.Name via api.methodOf() and can't represent a
+      // multi-method order). Reuses ca-api.js's methodsList() -- same helper
+      // the boards use for their own per-method chips -- so a screen print +
+      // heat press order (or two screen print placements) both show up here
+      // individually, and this sheet stays a correct reference regardless of
+      // which method it was printed for.
+      const methods = (api.methodsList ? api.methodsList(rec) : []).map(m => ({
+        id: m.id, type: m.type || 'Decoration', color: m.color || '#8a8378',
+        placementLabel: (m.placements && m.placements.length) ? m.placements.join(' + ') : '—',
+        status: m.status || '—',
+        /* S5: the Art Spec ("print recipe") for this decoration, one entry per location that has
+           one. getArtSpecs() resolves to {available:false} when the org has no spec layer, and
+           artSpecsForDecoration() then returns [], so the sheet prints exactly as before. */
+        specs: (api.artSpecsForDecoration ? api.artSpecsForDecoration(artSpecs, m.id, m.type) : [])
+          .filter(sp => sp.lines.length)
+          .map(sp => ({
+            title: (sp.placement ? sp.placement + ' · ' : '') + sp.name,
+            text: sp.lines.map(l => l.label + ': ' + l.value).join('   ·   '),
+            inks: sp.lines.filter(l => l.label === 'Ink colors').map(l => l.value),
+          })),
+      }));
+      // Ink colours: from the Art Specs when any spec names them, the items' Pantones otherwise.
+      const specInks = [];
+      methods.forEach(mm => mm.specs.forEach(sp => sp.inks.forEach(v => v.split(/\s*,\s*/).forEach(c => { if (c && specInks.indexOf(c) < 0) specInks.push(c); }))));
+      const order = {
+        goa: window.CAApi.orderNum(rec),
+        goaTail: api.text(rec.GOA_Order_Number__c).replace(/[^0-9-]/g,'') || '—',
+        customer: api.text(rec.Customer_Order_Name__c) || api.text(rec.Account&&rec.Account.Name) || '—',
+        account: api.text(rec.Account&&rec.Account.Name) || '', orderNumber: rec.OrderNumber || '',
+        method: api.methodOf(rec), methodLabelText: M[api.methodOf(rec)],
+        printDate: pd, qty: String(grand),
+        placement: placements.join(', ') || '—',
+        /* #11: when no Art Spec names the inks AND the item list failed to
+           load, the ink line would print as "—", which the press reads as "no
+           inks". Print the failure on the sheet itself instead. */
+        inkColors: specInks.length ? specInks.join(', ')
+                 : missed.items ? 'NOT LOADED — the ink list could not be read from Salesforce. Reload before printing, or check the order.'
+                 : (inkColors.join(', ') || '—'),
+        totalGarments: grand ? (String(grand) + ' pieces') : '—',
+        notes: api.text(rec.Production_Notes__c) || api.text(rec.Special_Notes__c) || '',
+        specs: api.text(rec.Specifications_for_Printing__c) || '',
+        methods,
+        mockupUrl: rec.DesignMockupUrl || null,
+        cols, grids, grand: String(grand),
+      };
+      this.setState({ status:'live', order });
+      /* D41 Phase 4 (2026-10-23): the frame numbers on this order, so the press crew can
+         pull the right screens. A separate, quiet read: the sheet never waits on it, and an
+         org without frames simply prints no Screens line. */
+      if (api.getFramesByOrders) api.getFramesByOrders([orderId]).then(m => this.setState({ frames: (m && m[orderId]) || [] })).catch(() => {});
+    } catch(e) {
+      // Was: `catch(_) { /* keep sample */ }` -- which left the fictional sample
+      // on screen, printable, whenever Salesforce was unreachable.
+      console.error('order sheet hydrate failed', orderId, e);
+      this.fail('Order ' + orderId + ' could not be loaded',
+                'Salesforce did not answer. Check the connection and reload; do not print this sheet until it shows real data.');
+    }
+  }
+  renderVals(){
+    const o = this.state.order;
+    const M = { sp:{label:'Screen Print',color:'var(--method-sp)'}, em:{label:'Embroidery',color:'var(--method-em)'}, hp:{label:'Heat Press',color:'var(--method-hp)'} };
+    /* Header Method chip. This used to be M[o.method] unconditionally, and
+       o.method is api.methodOf(rec) -- a GUESS off the press name that falls
+       back to Screen Print whenever it cannot tell (methodGuess, ca-api.js).
+       That was the only signal available before this sheet started listing the
+       order's real Production_Method__c records; it has them now (o.methods),
+       so the chip reads those and only falls back to the guess when the order
+       carries none. Colour is why this got fixed here: a green "Screen Print"
+       dot on an embroidery sheet is a wrong colour on paper, not just a wrong
+       word. An order printed more than one way gets the sheet's neutral ink
+       and "Multiple methods" -- every method is listed in full further down,
+       and one dot cannot honestly stand for two. */
+    const srcMethods = o.methods || [];
+    const distinct = [];
+    srcMethods.forEach(x => { if (x.type && distinct.indexOf(x.type) < 0) distinct.push(x.type); });
+    const guess = M[o.method] || M.sp;
+    const m = distinct.length === 1
+      ? { label: distinct[0], color: (srcMethods.filter(x => x.type === distinct[0])[0] || {}).color || guess.color }
+      : distinct.length > 1 ? { label: 'Multiple decorations', color: '#6b645c' }
+      : guess;
+    const grids = (o.grids||[]).map(g => ({
+      colorLabel: g.colorLabel, garment: g.garment, total: String(g.total),
+      tagBg: g.dark ? '#141210' : 'transparent', tagColor: g.dark ? '#fff' : '#141210',
+      cells: (o.cols||[]).map(c => { const q = g.qtys[c]; const zero = !q; return { qty: zero ? '·' : String(q), color: zero ? '#c9c1b7' : '#141210', weight: zero ? 400 : 700 }; }),
+    }));
+    const methods = (o.methods || []).map(x => Object.assign({}, x, { specs: x.specs || [], hasSpecs: !!(x.specs && x.specs.length) }));
+    const _fr = this.state.frames || [];
+    return {
+      hasScreens: _fr.length > 0,
+      screensLine: (window.CAApi && window.CAApi.framesChipText) ? window.CAApi.framesChipText(_fr) : '',
+      goa:o.goa, goaTail:o.goaTail, customer:o.customer, account:o.account, orderNumber:o.orderNumber,
+      methodLabel:m.label, methodColor:m.color, printDate:o.printDate, qty:o.qty,
+      placement:o.placement, inkColors:o.inkColors, totalGarments:o.totalGarments,
+      notes:o.notes||'None on file.', specs:o.specs||'None on file.',
+      methods, methodsEmpty: methods.length===0,
+      cols:o.cols, grids, grand:o.grand,
+      hasMockup:!!o.mockupUrl, noMockup:!o.mockupUrl,
+      mockupNode: o.mockupUrl ? window.CAApi.mockupView(o.mockupUrl,{alt:'Production mockup',style:{display:'block',width:'100%',height:420,boxSizing:'border-box',borderRadius:8,border:'1.5px solid #141210',objectFit:'contain',background:'#fff'}}) : null,
+      footNote: this.state.status==='live' ? 'Generated live from Salesforce' : 'SAMPLE — NOT A REAL ORDER',
+      // The sheet exists in the DOM for exactly these two states, so there is
+      // nothing to print in the other two.
+      showSheet: this.state.status==='live' || this.state.status==='demo',
+      showLoading: this.state.status==='loading',
+      showError: this.state.status==='error',
+      isDemo: this.state.status==='demo',
+      errorTitle: this.state.errorTitle, errorDetail: this.state.errorDetail,
+    };
+  }
+}
+</script>
+<script>
+/* ONE PAGE, ALWAYS (Anthony, 10-14, v4). The press crew must get the whole
+   order on one sheet of paper -- a page 2 gets left on the printer and then
+   someone prints without the inks or the specs.
+
+   WHY NOT "SHRINK WHEN PRINT IS PRESSED" (v1-v3). That version measured and
+   shrank in a beforeprint handler. It printed 1 page in headless Chromium,
+   but Anthony's Chrome print preview (Mac, order 18182) kept showing 2 pages:
+   Chrome builds and re-draws its preview on its own timing, and the shrink
+   did not reliably reach it.
+
+   HOW (v4). Nothing waits for the print button any more:
+     1. While the sheet sits on screen, the shrink it will need on paper is
+        worked out AHEAD of time -- on load, when fonts finish, and whenever
+        the sheet changes size -- and stored as a CSS variable,
+        --os-print-zoom, on #os-fit.
+     2. A print-only stylesheet applies it: `@media print { #os-fit { zoom:
+        var(--os-print-zoom) } }`. Pure CSS, so whenever and however often
+        Chrome draws the preview, the size is already there.
+     3. The same stylesheet lets boxes split (until 2026-10-20 it also shrank
+        the mockup picture on paper; no longer -- the big mockup is the point): inside the sheet,
+        break-inside:avoid is switched off on paper, so a box that is a hair
+        too tall can no longer jump whole to page 2 (Production Notes did).
+
+   THE MATH. The room on the page matches doc-page.js's own print rules: an
+   11in page, minus a top band of max(margin, header + 0.35in), a bottom band
+   of max(margin, footer + 0.35in), anything printed above the sheet (the
+   ?demo=1 banner), and 0.45in of safety for text wrapping differently on
+   paper. The paper-only compact rules are applied while measuring. Zoom can
+   re-wrap text, so the largest zoom that fits is FOUND by trying sizes
+   (synchronously, so the screen never shows it), not guessed.
+
+   Below WARN_BELOW a note appears on screen (never on paper) when printing,
+   so whoever printed knows to check the text is readable. */
+(function () {
+  var PAGE_H = 11 * 96;          // letter, in CSS px (1in = 96px)
+  var MARGIN = 0.55 * 96;        // must match margin="0.55in" on doc-page above
+  var SLOT_PAD = 0.35 * 96;      // doc-page.js's header/footer breathing room
+  var SAFETY = 0.45 * 96;
+  var MIN_ZOOM = 0.2;            // smaller is unreadable
+  var WARN_BELOW = 0.7;
+
+  // Paper-only rules. The same compact rules are switched on (class
+  // os-measuring) while measuring, so the screen measurement matches paper.
+  var COMPACT =
+    // 2026-10-20: the mockup is no longer shrunk on paper -- Anthony wants it big. If
+    // the sheet is too tall, the whole sheet is zoomed down evenly (below), image included.
+    '#os-fit [style*="break-inside"]{break-inside:auto!important}';
+  var css = document.createElement('style');
+  css.textContent =
+    '@media print{' + COMPACT.replace(/#os-fit/g, '#os-fit') +
+      '#os-fit{zoom:var(--os-print-zoom,1)}' +
+      '.os-fit-note{display:none!important}}' +
+    '@media screen{' + COMPACT.replace(/#os-fit/g, '#os-fit.os-measuring') + '}';
+  document.head.appendChild(css);
+
+  function els() {
+    var outer = document.getElementById('os-fit-outer');
+    var inner = document.getElementById('os-fit');
+    if (!outer || !inner) return null;
+    var page = outer.closest('doc-page') || outer.parentElement;
+    return {
+      outer: outer, inner: inner, page: page,
+      hdr: page && page.querySelector('[slot="header"]'),
+      ftr: page && page.querySelector('[slot="footer"]'),
+    };
+  }
+
+  function roomOnPage(e) {
+    var h = e.hdr ? e.hdr.offsetHeight : 0, f = e.ftr ? e.ftr.offsetHeight : 0;
+    var top = Math.max(MARGIN, h ? h + SLOT_PAD : 0);
+    var bottom = Math.max(MARGIN, f ? f + SLOT_PAD : 0);
+    var above = e.page ? Math.max(0, e.page.getBoundingClientRect().top + window.scrollY) : 0;
+    return PAGE_H - top - bottom - above - SAFETY;
+  }
+
+  var computing = false, lastZoom = 1, lastKey = '';
+
+  /** Work out the paper zoom now, on screen, and store it. Returns it. */
+  function compute() {
+    var e = els();
+    if (!e || computing) return lastZoom;
+    computing = true;
+    try {
+      e.inner.classList.add('os-measuring');
+      e.inner.style.zoom = '';
+      var room = roomOnPage(e);
+      var h = function () { return e.outer.getBoundingClientRect().height; };
+      var z = 1;
+      if (h() > room) {
+        var lo = MIN_ZOOM, hi = 1;
+        for (var i = 0; i < 14; i++) {
+          var mid = (lo + hi) / 2;
+          e.inner.style.zoom = String(mid);
+          if (h() <= room) lo = mid; else hi = mid;
+        }
+        z = hi <= MIN_ZOOM + 0.001 ? MIN_ZOOM : Math.floor(lo * 1000) / 1000;
+      }
+      e.inner.style.zoom = '';
+      e.inner.classList.remove('os-measuring');
+      e.inner.style.setProperty('--os-print-zoom', String(z));
+      lastZoom = z;
+      lastKey = Math.round(e.outer.getBoundingClientRect().height) + '|' + Math.round(e.outer.getBoundingClientRect().width);
+      return z;
+    } finally {
+      computing = false;
+    }
+  }
+
+  // Keep it current: the sheet renders after data loads, fonts arrive late,
+  // and the mockup image changes height when it loads.
+  var ro = window.ResizeObserver ? new ResizeObserver(function () {
+    var e = els();
+    if (!e || computing) return;
+    var key = Math.round(e.outer.getBoundingClientRect().height) + '|' + Math.round(e.outer.getBoundingClientRect().width);
+    if (key !== lastKey) compute();
+  }) : null;
+  var watched = null;
+  function watch() {
+    var e = els();
+    if (e && e.outer !== watched) {
+      if (ro) { if (watched) ro.unobserve(watched); ro.observe(e.outer); }
+      watched = e.outer;
+      compute();
+    }
+  }
+  // The sheet appears only once the order loads; look for it until it does
+  // (and again if it is re-rendered).
+  setInterval(watch, 500);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { compute(); });
+  window.addEventListener('load', function () { compute(); });
+
+  var noteEl = null;
+  function note(z) {
+    if (z == null) { if (noteEl) noteEl.style.display = 'none'; return; }
+    if (!noteEl) {
+      noteEl = document.createElement('div');
+      noteEl.className = 'os-fit-note';
+      noteEl.setAttribute('role', 'status');
+      noteEl.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:50;' +
+        'background:#141210;color:#fff;border:1.5px solid #C6372B;border-radius:8px;padding:10px 14px;' +
+        "font:500 13px/1.4 'Archivo',system-ui,sans-serif;max-width:90vw;box-shadow:0 4px 18px rgba(0,0,0,.35)";
+      document.body.appendChild(noteEl);
+      noteEl.addEventListener('click', function () { noteEl.style.display = 'none'; });
+    }
+    noteEl.textContent = z <= MIN_ZOOM
+      ? 'This order is too long to fit one readable page, even at ' + Math.round(z * 100) +
+        '% size, so it may print on 2 pages. Check the printout. (Click to close.)'
+      : 'This order is long, so the sheet printed at ' + Math.round(z * 100) +
+        '% size to fit one page. Check the printout is readable. (Click to close.)';
+    noteEl.style.display = '';
+  }
+  // Printing only SHOWS the note; the size was decided beforehand.
+  window.addEventListener('beforeprint', function () { note(lastZoom < WARN_BELOW ? lastZoom : null); });
+
+  window.__orderSheetFit = compute;   // for testing
+})();
+</script>
+</body>
+</html>

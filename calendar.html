@@ -1,0 +1,2562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Tab + app icons (Culture Apparel mark, 2026-10-26) -->
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<meta name="theme-color" content="#85302D">
+<meta name="apple-mobile-web-app-title" content="CA Production">
+<title>Production Calendar · Culture Apparel</title>
+<script>
+/* Self-hosted React (E4.4, 2026-08-31). support.js loads React and ReactDOM
+   from unpkg.com; unpkg being down or blocked made every board a white page,
+   with no fallback and nothing in the app's control.
+
+   support.js is GENERATED and must not be hand-edited, and dc-runtime/ is not
+   in this repo -- but it does not need editing. Its cdnScriptFor() checks
+   window.__resources[url] first and uses that value when it is a non-empty
+   string, so this map redirects both files to ./vendor/ copies with no change
+   to the generated file. Must run BEFORE support.js below.
+
+   The vendor files are byte-identical to what unpkg served: both were verified
+   against the SRI hashes support.js already pins. Note the override path drops
+   the integrity attribute (cdnScriptFor returns {src} only) -- acceptable
+   because these are now same-origin and travel under the same TLS and
+   Cloudflare Access boundary as the page itself.
+
+   Babel is deliberately NOT self-hosted: support.js only fetches it for
+   `jsx` script blocks and no page has one (every block is type="text/x-dc"),
+   so it is never requested. Add it here if a JSX page is ever introduced. */
+window.__resources = Object.assign({}, window.__resources, {
+  "https://unpkg.com/react@18.3.1/umd/react.production.min.js": "./vendor/react-18.3.1.production.min.js",
+  "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js": "./vendor/react-dom-18.3.1.production.min.js"
+});
+</script>
+<link rel="stylesheet" href="./tokens.css">
+<script src="./support.js"></script>
+<script src="./ca-api.js"></script>
+<script src="./seasonal.js" defer></script>
+</head>
+<body>
+
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css" rel="stylesheet">
+  <style>
+    /* The shared base moved to tokens.css (E10.2, 2026-09-01) -- linked from
+       every page's <head> above. The standing warning here used to read "do not
+       tidy this into variables unless the other five boards move at the same
+       time"; all nine moved together, which is what made it safe.
+
+       What is left below is genuinely this board's own: keyframes and grid
+       rules no other page has. This board previously shipped its own :root
+       token set and its own Tabler v2 -- which is why every sidebar icon
+       rendered as the same fallback glyph and the greys were a shade off
+       everywhere. Colours here should be var(--token), not new literals. */
+    @keyframes ca-pulse{0%,100%{box-shadow:0 0 0 0 rgba(226,74,58,.5)}50%{box-shadow:0 0 0 5px rgba(226,74,58,0)}}
+    @keyframes ca-slide{from{transform:translateX(30px);opacity:0}to{transform:translateX(0);opacity:1}}
+    @keyframes ca-glow{0%,100%{box-shadow:0 0 6px 2px var(--glow-c)}50%{box-shadow:0 0 16px 5px var(--glow-c)}}
+    /* The ONLY rule on this board that index.html doesn't have, and it earns its
+       place: six day columns plus an hour gutter need ~1040px, and beside a
+       fixed 330px queue that pushed SATURDAY off the right edge on a 1280 or
+       1440 laptop -- silently, behind a scroll, on a board for a shop that works
+       Saturdays. The queue gives ground first, then stacks above the calendar.
+       Inline styles can't express a breakpoint, which is why this is a class. */
+    .cal-body{display:grid;grid-template-columns:330px minmax(0,1fr);gap:14px;align-items:start}
+    /* Redesign 2026-10: the board now sits beside a sidebar, so the breakpoint
+       follows the calendar panel's own width (container query) instead of the
+       window -- same layouts as before, they just switch on the space actually
+       available. Old values: window 1560px -> 250px queue, 1400px -> stacked. */
+    @container calpanel (max-width:1540px){ .cal-body{grid-template-columns:250px minmax(0,1fr)} }
+    @container calpanel (max-width:1260px){ .cal-body{grid-template-columns:minmax(0,1fr)} }
+  </style>
+</helmet>
+
+<div style="display:flex;flex-direction:column;min-height:100vh;background:#0A0B0D">
+
+  <!-- ── header ───────────────────────────────────────────────────────── -->
+  <header class="ca-hdr" style="position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:20px;padding:0 24px 0 0;height:74px;background:linear-gradient(90deg,#0E0F12,#15161A 55%,#0E0F12);border-bottom:2px solid #7A1A15">
+    <button onClick="{{ onToggleSide }}" title="{{sideToggleTitle}}" style="width:56px;align-self:stretch;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-right:1px solid #1F2126;color:#ECEAE4;cursor:pointer" style-hover="color:#E0312B"><i class="ti {{sideToggleIcon}}" style="font-size:22px"></i></button>
+    <div class="ca-hdr-logo" style="width:220px;align-self:stretch;flex-shrink:0;display:flex;align-items:center;gap:11px;padding:0 18px;background:#0B0C0E;border-right:1px solid #1F2126">
+      <svg width="42" height="42" viewBox="0 0 48 48" aria-hidden="true" style="flex-shrink:0"><g fill="#E0312B"><rect x="12" y="9" width="24" height="3.1" rx="1.5"/><rect x="8" y="14" width="32" height="3.1" rx="1.5"/><rect x="5" y="19" width="38" height="3.1" rx="1.5"/><rect x="5" y="24" width="38" height="3.1" rx="1.5"/><rect x="6" y="29" width="36" height="3.1" rx="1.5"/><rect x="9" y="34" width="30" height="3.1" rx="1.5"/><rect x="13" y="39" width="22" height="3.1" rx="1.5"/></g></svg>
+      <div style="min-width:0"><div style="font:700 25px/0.9 'Oswald';color:#F4F2EC">CULTURE</div><div style="font:600 12px/1 'Oswald';letter-spacing:.32em;color:#F4F2EC;margin-top:4px;padding-left:20px">APPAREL</div></div>
+    </div>
+    <div class="ca-hdr-tag" style="font:400 13px/1 'Oswald';letter-spacing:.32em;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">QUALITY MERCH. REAL IMPACT.</div>
+    <div class="ca-hdr-right" style="margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end">
+      <div class="ca-hdr-clock" style="padding-right:18px;border-right:1px solid var(--warn);white-space:nowrap"><div style="font:500 18px/1 'Oswald';color:#F4F2EC">{{clock}}</div><div style="font:400 11px/1 'Archivo';color:var(--text-secondary);margin-top:5px">{{dateStr}}</div></div>
+      <sc-if value="{{readOnly}}" hint-placeholder-val="{{ false }}"><div title="Everyone can view the schedule; only managers and admins can change it" style="display:flex;align-items:center;gap:7px;font:600 10px/1 'Oswald';letter-spacing:.09em;text-transform:uppercase;color:#E0B870;background:#241a09;border:1px solid #5E4214;border-radius:8px;padding:8px 11px;white-space:nowrap"><i class="ti ti-lock"></i>View only</div></sc-if>
+      <div style="display:flex;align-items:center;gap:7px;font:600 10px/1 'Oswald';letter-spacing:.09em;text-transform:uppercase;color:var(--text-secondary);white-space:nowrap"><span style="width:8px;height:8px;border-radius:50%;background:{{connColor}};box-shadow:0 0 7px {{connColor}}"></span>{{connLabel}}</div>
+      <sc-if value="{{isAdmin}}" hint-placeholder-val="{{ false }}"><button onClick="{{ onOpenSfEnv }}" title="Salesforce environment -- click to switch" style="display:flex;align-items:center;gap:8px;font:600 11px/1 'Oswald';letter-spacing:.14em;text-transform:uppercase;color:#ECEAE4;background:transparent;border:1px solid #33353B;border-radius:100px;padding:9px 16px;cursor:pointer;white-space:nowrap" style-hover="border-color:#C6372B;color:#C6372B"><i class="ti ti-cloud" style="font-size:14px"></i>{{sfEnvLabel}}</button></sc-if>
+      <div style="display:flex;align-items:center;gap:10px"><span style="width:36px;height:36px;border-radius:50%;background:#ECEAE4;color:#111;font:700 13px/36px 'Archivo';text-align:center">{{workerInit}}</span><span class="ca-hdr-name" style="font:500 14px/1 'Archivo';color:#ECEAE4;white-space:nowrap">{{worker}}</span><button onClick="{{ onSwitchUser }}" title="Switch user" style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:transparent;border:1px solid #2a2a2f;color:var(--text-muted);cursor:pointer;flex-shrink:0" style-hover="border-color:#C6372B;color:#C6372B"><i class="ti ti-repeat" style="font-size:12px"></i></button></div>
+    </div>
+  </header>
+
+  <!-- ── all-boards nav drawer ────────────────────────────────────────── -->
+  <sc-if value="{{navOpen}}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ onCloseNav }}" style="position:fixed;inset:0;z-index:90;background:rgba(6,6,7,.66);backdrop-filter:blur(3px)"></div>
+    <aside style="position:fixed;top:0;left:0;bottom:0;z-index:91;width:min(300px,86vw);background:#0C0C0E;border-right:1px solid #232327;box-shadow:30px 0 70px -20px rgba(0,0,0,.8);display:flex;flex-direction:column;animation:ca-slide-left .2s ease">
+      <div style="display:flex;align-items:center;gap:12px;padding:20px 22px;border-bottom:1px solid #1b1b1e">
+        <svg width="28" height="28" viewBox="0 0 48 48" aria-hidden="true" style="flex-shrink:0"><g fill="#C6372B"><rect x="12" y="9" width="24" height="3.1" rx="1.5"/><rect x="8" y="14" width="32" height="3.1" rx="1.5"/><rect x="5" y="19" width="38" height="3.1" rx="1.5"/><rect x="5" y="24" width="38" height="3.1" rx="1.5"/><rect x="6" y="29" width="36" height="3.1" rx="1.5"/><rect x="9" y="34" width="30" height="3.1" rx="1.5"/><rect x="13" y="39" width="22" height="3.1" rx="1.5"/></g></svg>
+        <div style="font:700 13px/1 'Oswald';letter-spacing:.1em;color:#ECEAE4">CULTURE APPAREL</div>
+        <button onClick="{{ onCloseNav }}" style="margin-left:auto;flex-shrink:0;width:30px;height:30px;border-radius:8px;background:#16161a;border:1px solid #2a2a2f;color:var(--text-secondary);cursor:pointer" style-hover="color:#ECEAE4;border-color:#3a3a40"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="padding:14px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1">
+        <sc-for list="{{navBoards}}" as="b" hint-placeholder-count="7">
+          <a href="{{b.href}}" style="display:flex;align-items:center;gap:13px;background:{{b.bg}};border:1px solid {{b.border}};border-left:4px solid {{b.color}};border-radius:11px;padding:14px 15px;text-decoration:none" style-hover="border-color:#3a3a40">
+            <i class="ti {{b.icon}}" style="color:{{b.color}};font-size:19px;flex-shrink:0"></i>
+            <div style="min-width:0"><div style="font:600 13px/1 'Oswald';color:#ECEAE4">{{b.label}}</div><div style="font:400 10px/1.3 'Archivo';color:var(--text-muted);margin-top:3px">{{b.sub}}</div></div>
+            <sc-if value="{{b.isActive}}" hint-placeholder-val="{{ false }}"><i class="ti ti-circle-check" style="margin-left:auto;color:{{b.color}};font-size:16px;flex-shrink:0"></i></sc-if>
+          </a>
+        </sc-for>
+      </div>
+      <div style="padding:14px;border-top:1px solid #1b1b1e;display:flex;flex-direction:column;gap:8px;flex-shrink:0">
+        <button onClick="{{ onSwitchUser }}" style="display:flex;align-items:center;gap:10px;background:#141417;border:1px solid #232327;border-radius:10px;padding:12px 14px;color:#ECEAE4;font:600 12px/1 'Oswald';letter-spacing:.03em;cursor:pointer;text-align:left" style-hover="border-color:#3a3a40"><i class="ti ti-repeat" style="color:var(--text-tertiary);font-size:15px;flex-shrink:0"></i>Switch Account</button>
+        <button onClick="{{ onLogout }}" style="display:flex;align-items:center;gap:10px;background:transparent;border:1px solid #232327;border-radius:10px;padding:12px 14px;color:#E8A89F;font:600 12px/1 'Oswald';letter-spacing:.03em;cursor:pointer;text-align:left" style-hover="border-color:#7A241C;background:#2A100D"><i class="ti ti-logout" style="font-size:15px;flex-shrink:0"></i>Log Out</button>
+      </div>
+    </aside>
+  </sc-if>
+  <div style="flex:1;display:flex;min-height:0">
+  <sc-if value="{{sideOpen}}" hint-placeholder-val="{{ true }}">
+  <aside class="ca-side" style="width:220px;flex-shrink:0;background:#0C0D10;border-right:1px solid #1C1E22;display:flex;flex-direction:column;padding:16px 0;position:sticky;top:74px;height:calc(100vh - 74px);overflow-y:auto">
+    <nav style="display:flex;flex-direction:column;gap:3px">
+      <sc-for list="{{navBoards}}" as="b" hint-placeholder-count="8">
+        <a href="{{b.href}}" style="position:relative;display:flex;align-items:center;gap:12px;margin:0 10px;padding:11px 12px;border-radius:6px;background:{{b.bg}};text-decoration:none" style-hover="background:#17181C">
+          <sc-if value="{{b.isActive}}" hint-placeholder-val="{{ false }}"><span style="position:absolute;left:-10px;top:0;bottom:0;width:4px;border-radius:0 3px 3px 0;background:#E0312B"></span></sc-if>
+          <i class="ti {{b.icon}}" style="font-size:18px;color:{{b.color}};flex-shrink:0"></i>
+          <span style="font:500 13px/1.2 'Archivo';color:#ECEAE4;min-width:0">{{b.label}}</span>
+        </a>
+      </sc-for>
+    </nav>
+    <div style="margin-top:auto;padding:14px 10px 0;display:flex;flex-direction:column;gap:8px;border-top:1px solid #1C1E22">
+      <div class="ca-season-card" style="position:relative;height:132px;border-radius:8px;overflow:hidden;border:1px solid #2A2C32;flex-direction:column;justify-content:flex-end;padding:11px;margin-bottom:2px">
+        <div style="display:flex;align-items:center;gap:6px;font:600 10px/1 'Oswald';letter-spacing:.14em;color:#F4F2EC;text-transform:uppercase"><span class="ca-season-dot"></span><span class="ca-season-name"></span></div>
+        <div class="ca-season-range" style="font:400 10.5px/1.35 'Archivo';color:#D9D6CF;margin-top:5px"></div>
+        <button type="button" data-ca-fx-toggle="" class="ca-season-fxbtn" title="Turn the seasonal animation on or off on this device" style="margin-top:8px;align-self:flex-start;display:inline-flex;align-items:center;gap:5px;font:600 9px/1 'Oswald';letter-spacing:.1em;text-transform:uppercase;color:#F4F2EC;background:rgba(10,11,13,.55);border:1px solid rgba(255,255,255,.22);border-radius:5px;padding:5px 8px;cursor:pointer"></button>
+      </div>
+      <button onClick="{{ onSwitchUser }}" style="display:flex;align-items:center;gap:10px;background:#141417;border:1px solid #232327;border-radius:8px;padding:11px 12px;color:#ECEAE4;font:600 12px/1 'Oswald';letter-spacing:.03em;cursor:pointer;text-align:left" style-hover="border-color:#3a3a40"><i class="ti ti-repeat" style="color:var(--text-tertiary);font-size:15px;flex-shrink:0"></i>Switch Account</button>
+      <button onClick="{{ onLogout }}" style="display:flex;align-items:center;gap:10px;background:transparent;border:1px solid #232327;border-radius:8px;padding:11px 12px;color:#E8A89F;font:600 12px/1 'Oswald';letter-spacing:.03em;cursor:pointer;text-align:left" style-hover="border-color:#7A241C;background:#2A100D"><i class="ti ti-logout" style="font-size:15px;flex-shrink:0"></i>Log Out</button>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 4px 2px"><i class="ti ti-shield-half-filled" style="color:#E0312B;font-size:20px"></i><div style="font:600 9px/1.5 'Oswald';letter-spacing:.12em;color:var(--text-secondary)">BUILDING BRANDS<br>ONE ORDER AT A TIME.</div></div>
+    </div>
+  </aside>
+  </sc-if>
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;padding:18px 20px 32px">
+  <div class="ca-season-row" style="display:flex;align-items:center;gap:14px">
+    <div style="width:44px;height:44px;border-radius:10px;background:#9878C0;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 18px #9878C055"><i class="ti ti-calendar-time" style="font-size:22px;color:#08080A"></i></div>
+    <div style="min-width:0">
+      <div style="font:600 22px/1 'Oswald';letter-spacing:.06em;color:#F4F2EC;text-transform:uppercase">Production Calendar</div>
+      <div style="font:500 9px/1 'Oswald';letter-spacing:.34em;text-transform:uppercase;color:#9878C0;margin-top:6px">Priority · press schedule · print dates</div>
+    </div>
+  </div>
+
+  <!-- ── KPI row -->
+  <div style="display:flex;gap:10px;flex-wrap:nowrap">
+    <sc-for list="{{kpis}}" as="k" hint-placeholder-count="4">
+      <div style="position:relative;flex:1 1 0;min-width:0;background:#111215;border:1px solid #24262B;border-top:2px solid {{k.accent}};border-radius:8px;padding:14px 14px 13px">
+        <div style="font:500 11px/1.15 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{k.label}}</div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-top:10px;white-space:nowrap;overflow:hidden"><span style="font:600 28px/1 'Oswald';color:{{k.valueColor}}">{{k.value}}</span><span style="font:500 12px/1 'Oswald';color:var(--text-muted)">{{k.unit}}</span></div>
+        <div style="font:400 10.5px/1.3 'Archivo';color:var(--text-muted);margin-top:8px">{{k.sub}}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="background:#0F1013;border:1px solid #1F2126;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:14px;min-width:0;container-type:inline-size;container-name:calpanel">
+  <!-- ── filter row ───────────────────────────────────────────────────── -->
+  <div style="display:flex;align-items:center;gap:12px;padding:0;flex-wrap:wrap">
+    <div style="position:relative;flex:1;min-width:220px;max-width:360px">
+      <i class="ti ti-search" style="position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--text-faint);font-size:15px"></i>
+      <input value="{{q}}" onInput="{{ onSearch }}" placeholder="Search order #, customer, job name…" style="width:100%;background:#0B0C0E;border:1px solid #26282E;border-radius:6px;padding:11px 13px 11px 36px;font-size:13px;color:#ECEAE4;outline:none">
+    </div>
+    <div style="display:flex;gap:7px">
+      <sc-for list="{{viewTabs}}" as="v" hint-placeholder-count="2">
+        <button onClick="{{ v.onPick }}" style="display:inline-flex;align-items:center;gap:6px;font:600 10px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:{{v.textColor}};background:{{v.bg}};border:1px solid {{v.border}};border-radius:8px;padding:9px 12px;cursor:pointer"><i class="ti {{v.icon}}"></i>{{v.label}}</button>
+      </sc-for>
+    </div>
+    <div style="display:flex;gap:7px;align-items:center">
+      <button onClick="{{ onPrev }}" title="Previous" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;color:var(--text-secondary);background:transparent;border:1px solid #2a2a2f;border-radius:8px;cursor:pointer" style-hover="border-color:#C6372B;color:#C6372B"><i class="ti ti-chevron-left"></i></button>
+      <button onClick="{{ onToday }}" style="display:inline-flex;align-items:center;gap:6px;font:600 10px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary);background:transparent;border:1px solid #2a2a2f;border-radius:8px;padding:9px 12px;cursor:pointer" style-hover="border-color:#C6372B;color:#C6372B">Today</button>
+      <button onClick="{{ onNext }}" title="Next" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;color:var(--text-secondary);background:transparent;border:1px solid #2a2a2f;border-radius:8px;cursor:pointer" style-hover="border-color:#C6372B;color:#C6372B"><i class="ti ti-chevron-right"></i></button>
+      <span style="font:600 14px/1 'Oswald';letter-spacing:.06em;color:#ECEAE4;white-space:nowrap;margin-left:4px">{{rangeLabel}}</span>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+      <span style="font:400 11px/1 'Archivo';color:var(--text-muted)">{{shownLabel}}</span>
+      <button onClick="{{ onRefresh }}" style="display:inline-flex;align-items:center;gap:6px;font:600 10px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary);background:transparent;border:1px solid #2a2a2f;border-radius:8px;padding:9px 12px;cursor:pointer" style-hover="border-color:#C6372B;color:#C6372B"><i class="ti ti-refresh"></i>Refresh</button>
+    </div>
+  </div>
+
+  <!-- ── body ─────────────────────────────────────────────────────────── -->
+  <div class="cal-body" style="flex:1;padding:0">
+
+    <!-- queue -->
+    <div style="display:flex;flex-direction:column;gap:12px;min-width:0;background:#0D0D0F;border:1px solid #1b1b1e;border-radius:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:10px;background:#101013;border:1px solid #202024;border-left:4px solid #C6372B;border-radius:9px;padding:12px 14px">
+        <i class="ti ti-calendar-off" style="color:#C6372B;font-size:17px"></i>
+        <span style="font:600 12px/1 'Oswald';letter-spacing:.1em;text-transform:uppercase;color:#ECEAE4">Needs Scheduling</span>
+        <span style="margin-left:auto;font:700 15px/1 'Oswald';color:#C6372B">{{queueCount}}</span>
+      </div>
+      <div style="font:400 10px/1.3 'Archivo';letter-spacing:.03em;color:var(--text-faint);padding:0 4px;margin-top:-4px">{{queueHint}}</div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:9px;padding:0 4px">
+        <sc-for list="{{scoreLegend}}" as="s" hint-placeholder-count="4">
+          <span style="display:inline-flex;align-items:center;gap:5px;font:400 9px/1 'Archivo';color:var(--text-muted)"><i style="width:9px;height:9px;border-radius:2px;background:{{s.color}};display:inline-block"></i>{{s.label}}</span>
+        </sc-for>
+      </div>
+
+      <sc-for list="{{queue}}" as="o" hint-placeholder-count="2">
+        <div draggable="{{o.canDrag}}" onDragStart="{{ o.onDragStart }}" onDragEnd="{{ o.onDragEnd }}" onClick="{{ o.onOpen }}" style="display:flex;background:#101013;border:1px solid #202024;border-radius:11px;overflow:hidden;cursor:{{o.cursor}}" style-hover="border-color:#3a3a40">
+          <div style="width:4px;background:{{o.prepColor}};flex-shrink:0"></div>
+          <div style="flex:1;min-width:0;padding:12px 13px">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span style="font:600 14px/1.1 'Oswald';color:#ECEAE4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{o.customer}}</span>
+              <span style="margin-left:auto;flex-shrink:0;font:700 17px/1 'Oswald';color:{{o.scoreColor}}">{{o.score}}</span>
+            </div>
+            <div style="font:400 11px/1.3 'Archivo';color:var(--text-muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{o.sub}}</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+              <span style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary);background:#16161a;border:1px solid #2a2a2f;border-radius:6px;padding:5px 7px">{{o.method}}</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;font:700 9px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:{{o.prepColor}}"><i class="ti {{o.prepIcon}}"></i>{{o.prepLabel}}</span>
+            </div>
+            <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;background:#08080A;gap:2px;margin-top:9px">
+              <sc-for list="{{o.bars}}" as="b" hint-placeholder-count="4"><i style="display:block;height:100%;width:{{b.w}};background:{{b.c}}"></i></sc-for>
+            </div>
+            <div style="font:400 10px/1.3 'Archivo';color:var(--text-faint);margin-top:7px">{{o.suggestion}}</div>
+            <sc-if value="{{o.hasAmHint}}" hint-placeholder-val="{{ false }}">
+              <div style="display:inline-flex;align-items:center;gap:5px;margin-top:7px;font:600 9px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#5E9B9A;background:#101c1c;border:1px solid #23403f;border-radius:6px;padding:5px 7px"><i class="ti ti-user-check"></i>{{o.amHint}}</div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+
+      <sc-if value="{{queueEmpty}}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:26px 12px;background:#101013;border:1px dashed #232327;border-radius:11px">
+          <i class="ti ti-circle-check" style="color:#7FA644;font-size:24px"></i>
+          <div style="font:400 11px/1.4 'Archivo';color:var(--text-muted);text-align:center">Everything in this window has a run scheduled.</div>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- time grid -->
+    <div style="display:flex;flex-direction:column;gap:12px;min-width:0;background:#0D0D0F;border:1px solid #1b1b1e;border-radius:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:10px;background:#101013;border:1px solid #202024;border-left:4px solid #9878C0;border-radius:9px;padding:12px 14px">
+        <i class="ti ti-calendar-time" style="color:#9878C0;font-size:17px"></i>
+        <span style="font:600 12px/1 'Oswald';letter-spacing:.1em;text-transform:uppercase;color:#ECEAE4">{{gridTitle}}</span>
+        <span style="margin-left:auto;font:400 10px/1 'Archivo';color:var(--text-muted)">{{gridHint}}</span>
+      </div>
+
+      <!-- The load failed. Red, not amber: amber is "something is configured
+           oddly", this is "what you are looking at is not the shop". Sits
+           above the grid, which renders empty behind it. -->
+      <sc-if value="{{showLoadErr}}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:11px;align-items:flex-start;background:#2A0F0C;border:1px solid #7A241C;border-radius:8px;padding:14px 16px;margin:0 2px">
+          <i class="ti ti-plug-connected-x" style="color:#E8A89F;font-size:18px;flex-shrink:0;margin-top:1px"></i>
+          <div style="min-width:0">
+            <div style="font:600 12px/1.3 'Oswald';letter-spacing:.04em;color:#E8A89F">This calendar is not showing the schedule</div>
+            <div style="font:400 11px/1.55 'Archivo';color:#E3C9C5;margin-top:6px">{{loadErrMsg}}</div>
+            <div style="font:400 11px/1.55 'Archivo';color:#B99C98;margin-top:4px">Nothing is booked or moved while this is on screen. Do not schedule from memory &mdash; the grid below is empty, not free.</div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{noPresses}}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:11px;align-items:flex-start;background:#241a09;border:1px solid #5E4214;border-radius:8px;padding:14px 16px;margin:0 2px">
+          <i class="ti ti-alert-triangle" style="color:#E0B870;font-size:18px;flex-shrink:0;margin-top:1px"></i>
+          <div style="min-width:0">
+            <div style="font:600 12px/1.3 'Oswald';letter-spacing:.04em;color:#E0B870">No active Work Centers in this Salesforce org</div>
+            <div style="font:400 11px/1.55 'Archivo';color:#D8C79A;margin-top:6px">Nothing can be scheduled until a Work Center record with Active checked exists in Salesforce. This calendar is showing real (empty) data, not a demo &mdash; it will fill in as soon as Work Centers are added.</div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- press-group calendars: Press 1 / Press 2 / Embroidery / Heat Press / Master -->
+      <div style="display:flex;flex-wrap:wrap;gap:7px;padding:0 2px">
+        <sc-for list="{{calendars}}" as="c" hint-placeholder-count="5">
+          <button onClick="{{ c.onPick }}" style="display:inline-flex;align-items:center;gap:7px;font:600 10px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:{{c.textColor}};background:{{c.bg}};border:1px solid {{c.border}};border-radius:8px;padding:9px 12px;cursor:pointer" style-hover="border-color:#3a3a40">
+            <i class="ti {{c.icon}}" style="color:{{c.dotColor}}"></i>{{c.label}}
+            <span style="font:700 10px/1 'Oswald';color:{{c.countColor}}">{{c.count}}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:11px;padding:0 4px">
+        <span style="font:400 9px/1 'Archivo';color:var(--text-faint)">Bar colour = prep status</span>
+        <sc-for list="{{prepLegend}}" as="s" hint-placeholder-count="3">
+          <span style="display:inline-flex;align-items:center;gap:5px;font:400 9px/1 'Archivo';color:var(--text-muted)"><i style="width:9px;height:9px;border-radius:2px;background:{{s.color}};display:inline-block"></i>{{s.label}}</span>
+        </sc-for>
+        <span style="font:400 9px/1 'Archivo';color:var(--text-faint);margin-left:4px">Dashed = not on the shop calendar · amber dashed = auto-scheduler found no slot · purple = on the shop calendar · greyed = finished</span>
+      </div>
+
+      <div style="overflow-x:auto">
+        <div style="display:grid;gap:4px;min-width:{{gridMinW}};grid-template-columns:{{gridCols}}">
+          <div></div>
+          <sc-for list="{{headers}}" as="h" hint-placeholder-count="6">
+            <div style="background:{{h.bg}};border:1px solid {{h.border}};border-radius:9px;padding:8px 10px;text-align:center">
+              <div style="font:600 11px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:{{h.color}}">{{h.label}}</div>
+              <div style="font:400 9px/1 'Archivo';color:var(--text-faint);margin-top:4px">{{h.sub}}</div>
+            </div>
+          </sc-for>
+
+          <!-- hour gutter -->
+          <div>
+            <sc-for list="{{hourLabels}}" as="hr" hint-placeholder-count="9">
+              <div style="height:{{rowH}};display:flex;align-items:flex-start;justify-content:flex-end;padding-right:9px;font:500 9px/1 'Oswald';letter-spacing:.07em;color:var(--text-faint)">{{hr.label}}</div>
+            </sc-for>
+          </div>
+
+          <!-- one positioned track per day -->
+          <sc-for list="{{cols}}" as="c" hint-placeholder-count="6">
+            <div style="position:relative;height:{{trackH}};background:#0A0A0C;background-image:{{hourLines}};border:1px solid #16161a;border-radius:9px;overflow:hidden">
+              <sc-for list="{{c.slots}}" as="s" hint-placeholder-count="9">
+                <div title="{{s.title}}" style="position:absolute;left:0;right:0;top:{{s.top}};height:{{s.height}};background:{{s.overBg}}"
+                     onDragOver="{{ s.onDragOver }}" onDragLeave="{{ s.onDragLeave }}" onDrop="{{ s.onDrop }}"></div>
+              </sc-for>
+              <sc-for list="{{c.blocks}}" as="b" hint-placeholder-count="2">
+                <div draggable="{{b.canDrag}}" onDragStart="{{ b.onDragStart }}" onDragEnd="{{ b.onDragEnd }}" onClick="{{ b.onOpen }}" title="{{b.title}}"
+                     style="position:absolute;left:{{b.left}};width:{{b.width}};top:{{b.top}};height:{{b.height}};background:#141417;border:1px {{b.borderStyle}} #232327;border-left:3px solid {{b.color}};border-radius:7px;padding:5px 7px;overflow:hidden;cursor:{{b.cursor}};opacity:{{b.opacity}}"
+                     style-hover="border-color:#3a3a40">
+                  <div style="display:flex;align-items:baseline;gap:5px">
+                    <span style="font:600 10px/1 'Oswald';letter-spacing:.04em;color:#ECEAE4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{b.num}}</span>
+                    <sc-if value="{{b.showScore}}" hint-placeholder-val="{{ true }}"><span style="margin-left:auto;flex-shrink:0;font:700 11px/1 'Oswald';color:{{b.scoreColor}}">{{b.score}}</span></sc-if>
+                  </div>
+                  <div title="{{b.press}}" style="display:flex;align-items:center;gap:4px;margin-top:3px">
+                    <i class="ti ti-printer" style="font-size:10px;color:{{b.pressColor}};flex-shrink:0"></i>
+                    <sc-if value="{{b.showPress}}" hint-placeholder-val="{{ true }}"><span style="font:600 9px/1 'Oswald';letter-spacing:.05em;text-transform:uppercase;color:{{b.pressColor}};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{b.press}}</span></sc-if>
+                  </div>
+                  <sc-if value="{{b.roomy}}" hint-placeholder-val="{{ true }}">
+                    <div style="font:400 10px/1.3 'Archivo';color:var(--text-secondary);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{b.customer}}</div>
+                    <div style="font:400 9px/1.3 'Archivo';color:var(--text-faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{b.time}}</div>
+                    <sc-if value="{{b.hasQty}}" hint-placeholder-val="{{ true }}">
+                      <div style="font:400 9px/1.3 'Archivo';color:var(--text-faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{b.qtyLabel}}</div>
+                    </sc-if>
+                  </sc-if>
+                  <sc-if value="{{b.lateShip}}" hint-placeholder-val="{{ false }}">
+                    <div title="Booked after this order's ship-by date" style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;margin-right:4px;font:700 8px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#E8A89F;background:#2A100D;border:1px solid #7A241C;border-radius:5px;padding:4px 5px;white-space:nowrap"><i class="ti ti-truck-delivery"></i>After ship-by</div>
+                  </sc-if>
+                  <sc-if value="{{b.hasPrepOpen}}" hint-placeholder-val="{{ false }}">
+                    <div style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;font:700 8px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#E0B870;background:#221a0c;border:1px solid #4a3a18;border-radius:5px;padding:4px 5px;white-space:nowrap"><i class="ti ti-alert-triangle"></i>{{b.prepOpenLabel}}</div>
+                  </sc-if>
+                </div>
+              </sc-for>
+              <!-- now line: painted after the blocks so it sits on top, and
+                   pointer-events:none so it can never eat a drop -->
+              <sc-if value="{{c.showNow}}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;left:0;right:0;top:{{c.nowTop}};height:0;pointer-events:none;z-index:4">
+                  <div style="position:absolute;left:0;right:0;top:-1px;height:2px;background:#E24A3A"></div>
+                  <div style="position:absolute;left:0;top:-4px;width:9px;height:9px;border-radius:50%;background:#E24A3A;box-shadow:0 0 8px rgba(226,74,58,.65)"></div>
+                  <div style="position:absolute;right:3px;top:-9px;font:700 8px/17px 'Oswald';letter-spacing:.07em;color:#fff;background:#E24A3A;border-radius:5px;padding:0 6px;white-space:nowrap">{{c.nowLabel}}</div>
+                </div>
+              </sc-if>
+              <sc-if value="{{c.empty}}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:400 10px/1 'Archivo';color:var(--text-ghost);pointer-events:none">nothing scheduled</div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="font:400 10px/1.4 'Archivo';color:var(--text-faint);padding:2px 4px 0">{{gridFooter}}</div>
+    </div>
+  </div>
+  </div>
+  </div>
+  </div>
+</div>
+
+<!-- ── order drawer ───────────────────────────────────────────────────── -->
+<sc-if value="{{drawerOpen}}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ onCloseDrawer }}" style="position:fixed;inset:0;z-index:60;background:rgba(6,6,7,.66);backdrop-filter:blur(3px)"></div>
+  <aside style="position:fixed;top:0;right:0;bottom:0;z-index:61;width:min(460px,100vw);background:#0C0C0E;border-left:1px solid #232327;box-shadow:-30px 0 70px -20px rgba(0,0,0,.8);display:flex;flex-direction:column;animation:ca-slide .22s ease">
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:20px 22px;border-bottom:1px solid #1b1b1e;border-top:4px solid {{d.scoreColor}}">
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font:600 10px/1 'Oswald';letter-spacing:.08em;color:var(--text-muted)">{{d.num}}</span><span style="display:inline-flex;align-items:center;gap:5px;font:600 9px/1 'Oswald';letter-spacing:.09em;text-transform:uppercase;color:var(--text-secondary)"><span style="width:7px;height:7px;border-radius:50%;background:{{d.prepColor}}"></span>{{d.method}}</span></div>
+        <div style="font:600 21px/1.05 'Oswald';color:#ECEAE4">{{d.customer}}</div>
+        <div style="font:400 12px/1 'Archivo';color:var(--text-muted);margin-top:5px">{{d.job}}</div>
+        <sc-if value="{{drawerHasFramesChip}}" hint-placeholder-val="{{ false }}"><div style="margin-top:9px"><span title="Screen frames on this order" style="display:inline-flex;align-items:center;gap:6px;background:#12201F;border:1px solid #2C4A49;border-radius:100px;padding:5px 10px"><i class="ti ti-grid-4x4" style="font-size:11px;color:#1FB2A6"></i><span style="font:600 10px/1.2 'Oswald';letter-spacing:.05em;text-transform:uppercase;color:#9FD8D2">{{drawerFramesChip}}</span></span></div></sc-if>
+      </div>
+      <button onClick="{{ onCloseDrawer }}" style="margin-left:auto;flex-shrink:0;width:34px;height:34px;border-radius:9px;background:#16161a;border:1px solid #2a2a2f;color:var(--text-secondary);cursor:pointer;font-size:17px" style-hover="color:#ECEAE4;border-color:#3a3a40"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;padding:20px 22px;display:flex;flex-direction:column;gap:24px">
+
+      <div>
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span style="font:700 42px/0.85 'Oswald';color:{{d.scoreColor}}">{{d.score}}</span>
+          <span style="font:400 11px/1.3 'Archivo';color:var(--text-muted)">priority out of 10<br>{{d.daysLabel}}</span>
+        </div>
+        <sc-if value="{{d.shipWarn}}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:flex-start;gap:7px;margin-top:12px;font:400 11px/1.4 'Archivo';color:#E8A89F;background:#2A100D;border:1px solid #7A241C;border-radius:8px;padding:9px 11px"><i class="ti ti-truck-delivery" style="font-size:14px;flex-shrink:0;margin-top:1px"></i><span>{{d.shipWarnText}}</span></div>
+        </sc-if>
+        <div style="display:flex;height:9px;border-radius:5px;overflow:hidden;background:#08080A;gap:2px;margin-top:14px">
+          <sc-for list="{{d.bars}}" as="b" hint-placeholder-count="4"><i style="display:block;height:100%;width:{{b.w}};background:{{b.c}}"></i></sc-for>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:10px">
+          <sc-for list="{{d.parts}}" as="p" hint-placeholder-count="4">
+            <span style="display:inline-flex;align-items:center;gap:6px;font:400 10px/1 'Archivo';color:var(--text-secondary)"><i style="width:9px;height:9px;border-radius:2px;background:{{p.color}};display:inline-block"></i>{{p.label}} <b style="font:600 11px/1 'Oswald';color:#ECEAE4">{{p.value}}</b></span>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <div style="font:500 10px/1 'Oswald';letter-spacing:.13em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">Pre-Production</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:6px;font:700 12px/1 'Oswald';letter-spacing:.05em;text-transform:uppercase;color:{{d.prepColor}}"><i class="ti {{d.prepIcon}}"></i>{{d.prepLabel}}</span>
+          <span style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary);background:#16161a;border:1px solid #2a2a2f;border-radius:6px;padding:6px 8px">{{d.readyPct}} of checklist</span>
+        </div>
+
+        <sc-if value="{{d.hasPrepItems}}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:11px;background:#121215;border:1px solid #232327;border-radius:10px;padding:11px 12px">
+            <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:9px">{{d.prepCountLabel}}</div>
+            <sc-for list="{{d.prepItems}}" as="it" hint-placeholder-count="2">
+              <div style="padding:7px 0;border-top:1px solid #1b1b1e">
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <span style="font:600 11px/1.2 'Oswald';color:#ECEAE4;min-width:74px">{{it.type}}</span>
+                  <span style="font:400 11px/1.2 'Archivo';color:var(--text-secondary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{it.detail}} {{it.method}}</span>
+                  <span style="font:600 9px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:{{it.statusColor}};white-space:nowrap">{{it.status}}</span>
+                </div>
+                <sc-if value="{{it.hasStation}}" hint-placeholder-val="{{ true }}">
+                  <a href="{{it.stationHref}}" style="display:inline-flex;align-items:center;gap:5px;margin-top:6px;font:700 9px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:var(--text-secondary);background:#16161a;border:1px solid #2a2a2f;border-radius:6px;padding:7px 9px;text-decoration:none" style-hover="border-color:#5E9B9A;color:#5E9B9A"><i class="ti ti-external-link"></i>Go to {{it.stationLabel}}</a>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- Garments (E1.5). The drawer used to show one piece count for the
+           whole order; this is what that count is actually made of. Divs with
+           ARIA roles, never a <table>: sc-for inside one is foster-parented
+           out by the HTML parser before the runtime compiles the template. -->
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font:500 10px/1 'Oswald';letter-spacing:.13em;text-transform:uppercase;color:var(--text-muted)">Garments</span>
+          <sc-if value="{{d.hasSizes}}" hint-placeholder-val="{{ true }}">
+            <span style="margin-left:auto;font:400 10px/1 'Archivo';color:var(--text-secondary)">{{d.sizeTotal}} pieces</span>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{d.sizeLoading}}" hint-placeholder-val="{{ false }}">
+          <div style="font:400 11px/1.4 'Archivo';color:var(--text-muted)">Loading garments…</div>
+        </sc-if>
+        <sc-if value="{{d.sizeFailed}}" hint-placeholder-val="{{ false }}">
+          <div style="font:400 11px/1.4 'Archivo';color:var(--danger-text)">Couldn't load the garment breakdown. The piece count above still stands.</div>
+        </sc-if>
+        <sc-if value="{{d.sizeEmpty}}" hint-placeholder-val="{{ false }}">
+          <div style="font:400 11px/1.4 'Archivo';color:var(--text-muted)">No garment line items on this order yet.</div>
+        </sc-if>
+
+        <sc-if value="{{d.hasSizes}}" hint-placeholder-val="{{ true }}">
+          <div role="table" aria-label="Garments on this order by size" style="display:table;width:100%;border-collapse:collapse;background:var(--surface-card);border:1px solid var(--border-subtle);border-radius:10px;padding:4px 10px 8px">
+            <div role="row" style="display:table-row">
+              <div role="columnheader" style="display:table-cell;text-align:left;padding:7px 6px 6px 0;font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary)">Garment</div>
+              <sc-for list="{{d.sizeCols}}" as="c" hint-placeholder-count="5">
+                <div role="columnheader" style="display:table-cell;text-align:right;padding:7px 0 6px 8px;font:600 9px/1 'Oswald';letter-spacing:.06em;color:var(--text-tertiary)">{{c.label}}</div>
+              </sc-for>
+              <div role="columnheader" style="display:table-cell;text-align:right;padding:7px 0 6px 12px;font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary)">Qty</div>
+            </div>
+            <sc-for list="{{d.sizeRows}}" as="g" hint-placeholder-count="2">
+              <div role="row" style="display:table-row">
+                <div role="cell" style="display:table-cell;text-align:left;vertical-align:middle;padding:6px 6px 6px 0;border-top:1px solid var(--border-card)">
+                  <div style="font:600 11px/1.2 'Oswald';color:var(--text-primary)">{{g.colorLabel}}</div>
+                  <div style="font:400 10px/1.2 'Archivo';color:var(--text-muted);margin-top:2px">{{g.garment}}</div>
+                </div>
+                <sc-for list="{{g.cells}}" as="c" hint-placeholder-count="5">
+                  <div role="cell" style="display:table-cell;text-align:right;vertical-align:middle;padding:6px 0 6px 8px;border-top:1px solid var(--border-card);font:400 11px/1.2 'Archivo';color:{{c.color}}">{{c.qty}}</div>
+                </sc-for>
+                <div role="cell" style="display:table-cell;text-align:right;vertical-align:middle;padding:6px 0 6px 12px;border-top:1px solid var(--border-card);font:600 11px/1.2 'Oswald';color:var(--text-primary)">{{g.total}}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font:500 10px/1 'Oswald';letter-spacing:.13em;text-transform:uppercase;color:var(--text-muted)">Production Runs</span>
+          <span style="margin-left:auto;font:400 10px/1 'Archivo';color:{{d.qtyColor}}">{{d.qtyLabel}}</span>
+        </div>
+
+        <sc-for list="{{d.runs}}" as="r" hint-placeholder-count="1">
+          <div style="background:#101013;border:1px solid #202024;border-left:3px solid {{r.color}};border-radius:10px;padding:12px 14px;margin-bottom:8px">
+            <div style="font:600 13px/1.1 'Oswald';color:#ECEAE4">{{r.press}} · {{r.when}}</div>
+            <div style="font:400 11px/1.3 'Archivo';color:var(--text-muted);margin-top:4px">{{r.status}}</div>
+
+            <sc-if value="{{r.notPublished}}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:flex-start;gap:7px;font:400 10px/1.35 'Archivo';color:#E8A89F;background:#2A100D;border:1px solid #7A241C;border-radius:8px;padding:9px 11px;margin-top:9px"><i class="ti ti-alert-triangle" style="margin-top:1px"></i><span>This run is not on the shop calendar. Runs publish when they're created, so this one's publish failed — save any change to it to retry.</span></div>
+            </sc-if>
+
+            <sc-if value="{{r.canEdit}}" hint-placeholder-val="{{ true }}">
+              <div style="border-top:1px solid #1b1b1e;margin-top:12px;padding-top:12px;display:flex;flex-direction:column;gap:9px">
+                <div>
+                  <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Press</div>
+                  <select value="{{r.pressId}}" onChange="{{ r.onPress }}" style="width:100%;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;font-size:12px;color:#ECEAE4;outline:none">
+                    <option value="">Pick a press…</option>
+                    <sc-for list="{{r.pressOptions}}" as="p" hint-placeholder-count="4"><option value="{{p.id}}">{{p.name}}</option></sc-for>
+                  </select>
+                </div>
+                <div>
+                  <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Scheduled Start</div>
+                  <div style="display:flex;gap:7px">
+                    <input type="date" value="{{r.startDate}}" onInput="{{ r.onStartDate }}" style="flex:1;min-width:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none">
+                    <select value="{{r.startTime}}" onChange="{{ r.onStartTime }}" style="width:118px;flex-shrink:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none"><option value="">Time…</option><sc-for list="{{r.timeOptions}}" as="tt" hint-placeholder-count="96"><option value="{{tt.value}}">{{tt.label}}</option></sc-for></select>
+                  </div>
+                </div>
+                <div>
+                  <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Scheduled End</div>
+                  <div style="display:flex;gap:7px">
+                    <input type="date" value="{{r.endDate}}" onInput="{{ r.onEndDate }}" style="flex:1;min-width:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none">
+                    <select value="{{r.endTime}}" onChange="{{ r.onEndTime }}" style="width:118px;flex-shrink:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none"><option value="">Time…</option><sc-for list="{{r.timeOptions}}" as="tt" hint-placeholder-count="96"><option value="{{tt.value}}">{{tt.label}}</option></sc-for></select>
+                  </div>
+                </div>
+                <!-- 2026-10-23 (Anthony): Calendar check -- every run already on this press that day; an overlap is refused. -->
+                <sc-if value="{{r.pcRow.pcShown}}" hint-placeholder-val="{{ false }}">
+                  <div style="background:#101014;border:1px solid {{r.pcRow.pc.boxBorder}};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:6px">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><i class="ti ti-calendar-search" style="color:var(--text-tertiary);font-size:13px"></i><span style="font:600 10px/1 'Oswald';letter-spacing:.1em;text-transform:uppercase;color:var(--text-tertiary)">Calendar check</span><span style="font:500 11px/1 'Archivo';color:var(--text-secondary)">{{r.pcRow.pc.title}}</span><a href="{{r.pcRow.pcUrl}}" target="_blank" rel="noopener" style="margin-left:auto;font:600 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#5E9B9A;text-decoration:none;white-space:nowrap">Open calendar <i class="ti ti-arrow-up-right"></i></a></div>
+                    <sc-if value="{{r.pcRow.pc.hasNote}}" hint-placeholder-val="{{ false }}"><div style="font:400 11px/1.4 'Archivo';color:var(--text-tertiary)">{{r.pcRow.pc.note}}</div></sc-if>
+                    <sc-for list="{{r.pcRow.pc.rows}}" as="pr" hint-placeholder-count="2"><div style="display:flex;gap:8px;align-items:center;font:400 11px/1.35 'Archivo';color:{{pr.color}};background:{{pr.bg}};border:1px solid {{pr.border}};border-radius:7px;padding:6px 8px"><span style="min-width:122px;font-weight:600">{{pr.time}}</span><span style="flex:1;min-width:0">{{pr.text}}</span><sc-if value="{{pr.clash}}" hint-placeholder-val="{{ false }}"><span style="font:700 9px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;white-space:nowrap">{{pr.badge}}</span></sc-if></div></sc-for>
+                    <sc-if value="{{r.pcRow.pc.showEmpty}}" hint-placeholder-val="{{ false }}"><div style="font:400 11px/1.4 'Archivo';color:var(--text-faint)">{{r.pcRow.pc.emptyText}}</div></sc-if>
+                    <sc-if value="{{r.pcRow.pc.hasClash}}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:6px;align-items:flex-start;font:600 11px/1.4 'Archivo';color:#E8A89F"><i class="ti ti-alert-triangle" style="margin-top:1px"></i><span>{{r.pcRow.pc.clashText}}</span></div></sc-if>
+                    <sc-if value="{{r.pcRow.pc.hasOk}}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:6px;align-items:center;font:600 11px/1.3 'Archivo';color:#BBD382"><i class="ti ti-check"></i><span>{{r.pcRow.pc.okText}}</span></div></sc-if>
+                  </div>
+                </sc-if>
+                <sc-if value="{{r.locationShown}}" hint-placeholder-val="{{ true }}">
+                  <div>
+                    <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Print Location</div>
+                    <select value="{{r.printLocation}}" onChange="{{ r.onPrintLocation }}" style="width:190px;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;font-size:12px;color:#ECEAE4;outline:none">
+                      <option value="">— Not set —</option>
+                      <sc-for list="{{r.locationOptions}}" as="loc" hint-placeholder-count="3"><option value="{{loc}}">{{loc}}</option></sc-for>
+                    </select>
+                  </div>
+                </sc-if>
+                <sc-if value="{{r.alsoShown}}" hint-placeholder-val="{{ false }}">
+                  <div>
+                    <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Also Prints On <span style="text-transform:none;letter-spacing:0;font:400 10px/1 'Archivo';color:var(--text-muted)">· same design, same run, counted once</span></div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;max-width:320px">
+                      <sc-for list="{{r.alsoChips}}" as="a" hint-placeholder-count="2"><button type="button" onClick="{{ a.onToggle }}" style="font:600 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:{{a.textColor}};background:{{a.bg}};border:1px solid {{a.border}};border-radius:7px;padding:8px 10px;cursor:pointer">{{a.mark}}{{a.label}}</button></sc-for>
+                    </div>
+                  </div>
+                </sc-if>
+                <div>
+                  <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Scheduled Qty</div>
+                  <input type="number" min="1" value="{{r.qty}}" onInput="{{ r.onQty }}" style="width:140px;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;font-size:12px;color:#ECEAE4;outline:none">
+                  <sc-if value="{{r.hasQtyHint}}" hint-placeholder-val="{{ false }}"><div style="display:inline-flex;align-items:center;gap:5px;font:400 10px/1.3 'Archivo';color:var(--text-tertiary);margin-top:6px"><i class="ti ti-shirt" style="font-size:12px;color:var(--text-muted)"></i>{{r.qtyHint}}</div></sc-if>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:2px">
+                  <button onClick="{{ r.onSave }}" disabled="{{r.busy}}" style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;font:700 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#fff;background:#C6372B;border:none;border-radius:8px;padding:11px;cursor:pointer" style-hover="filter:brightness(1.1)"><i class="ti ti-device-floppy"></i>{{r.saveLabel}}</button>
+                  <button onClick="{{ r.onRemove }}" disabled="{{r.busy}}" style="font:700 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#E8A89F;background:transparent;border:1px solid #7A241C;border-radius:8px;padding:11px 13px;cursor:pointer" style-hover="background:#2A100D"><i class="ti ti-trash"></i></button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+
+        <sc-if value="{{d.noRuns}}" hint-placeholder-val="{{ false }}">
+          <div style="background:#101013;border:1px dashed #232327;border-radius:10px;padding:14px;font:400 11px/1.4 'Archivo';color:var(--text-muted);margin-bottom:8px">Not scheduled yet. {{d.suggestion}}</div>
+        </sc-if>
+
+        <sc-if value="{{d.hasProposals}}" hint-placeholder-val="{{ false }}">
+          <div style="background:#101316;border:1px solid #1d2a2a;border-radius:11px;padding:13px 14px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:3px">
+              <i class="ti ti-user-check" style="font-size:14px;color:#5E9B9A"></i>
+              <div style="font:600 10px/1 'Oswald';letter-spacing:.1em;text-transform:uppercase;color:#5E9B9A">Account Manager Suggested</div>
+            </div>
+            <div style="font:400 10px/1.45 'Archivo';color:var(--text-muted);margin-bottom:10px">What was promised when the order closed. Nothing here is booked — use one to fill in the run below, or turn it down.</div>
+            <sc-for list="{{d.proposals}}" as="p" hint-placeholder-count="1">
+              <div style="background:#0D0D0F;border:1px solid #1f1f23;border-radius:9px;padding:10px 11px;margin-bottom:7px">
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <div style="font:600 13px/1.2 'Oswald';color:#ECEAE4">{{p.machine}}</div>
+                  <div style="font:400 11px/1.2 'Archivo';color:var(--text-secondary)">{{p.when}}</div>
+                </div>
+                <div style="font:400 10px/1.4 'Archivo';color:var(--text-muted);margin-top:3px">{{p.name}} · {{p.meta}}</div>
+                <sc-if value="{{p.hasNotes}}" hint-placeholder-val="{{ false }}">
+                  <div style="font:400 11px/1.45 'Archivo';color:#C9C6BF;margin-top:6px;white-space:pre-wrap">{{p.notes}}</div>
+                </sc-if>
+                <div style="display:flex;gap:7px;margin-top:9px">
+                  <button onClick="{{ p.onUse }}" disabled="{{p.busy}}" style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;font:700 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#5E9B9A;background:transparent;border:1px solid #2c4645;border-radius:7px;padding:9px;cursor:pointer" style-hover="background:#132020"><i class="ti ti-arrow-down-to-arc"></i>{{p.useLabel}}</button>
+                  <button onClick="{{ p.onReject }}" disabled="{{p.busy}}" style="font:700 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:var(--text-tertiary);background:transparent;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;cursor:pointer" style-hover="color:#E8A89F;border-color:#7A241C">Turn Down</button>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{d.hasShortfall}}" hint-placeholder-val="{{ false }}">
+          <div style="background:#241C0A;border:1px solid #5E4A14;border-radius:10px;padding:13px 14px;margin-bottom:10px">
+            <div style="display:flex;gap:10px;align-items:flex-start">
+              <i class="ti ti-calendar-exclamation" style="color:#E0B23C;font-size:16px;flex-shrink:0;margin-top:1px"></i>
+              <div style="min-width:0">
+                <div style="font:600 12px/1.3 'Oswald';color:#ECEAE4">{{d.shortfallQty}} garments never made it to the press</div>
+                <div style="font:400 11px/1.55 'Archivo';color:#D8C79A;margin-top:5px">Counted on a finished run but never printed. They're intact and still on the shelf — schedule press time on the same decoration before the delivery date.</div>
+              </div>
+            </div>
+            <sc-if value="{{d.shortfallCanAct}}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ d.onScheduleMakeup }}" style="width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px;font:700 10px/1 'Oswald';letter-spacing:.07em;text-transform:uppercase;color:#08080A;background:#E0B23C;border:none;border-radius:8px;padding:11px;cursor:pointer;margin-top:11px" style-hover="filter:brightness(1.08)"><i class="ti ti-plus"></i>Schedule The Make-Up Run</button>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{d.newRunShut}}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ d.onToggleNewRun }}" style="display:inline-flex;align-items:center;gap:6px;font:700 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#5E9B9A;background:transparent;border:1px dashed #2c4645;border-radius:8px;padding:9px 12px;cursor:pointer" style-hover="background:#132020;border-style:solid"><i class="ti ti-plus"></i>Add A Run</button>
+        </sc-if>
+
+        <sc-if value="{{d.newRunOpen}}" hint-placeholder-val="{{ true }}">
+          <div style="background:#101013;border:1px solid #202024;border-left:3px solid #5E9B9A;border-radius:10px;padding:12px 14px">
+            <div onClick="{{ d.onToggleNewRun }}" style="display:flex;align-items:center;gap:7px;margin-bottom:11px;cursor:pointer" style-hover="opacity:.75">
+              <span style="font:600 11px/1 'Oswald';letter-spacing:.1em;text-transform:uppercase;color:#5E9B9A">Add A Run</span>
+              <i class="ti ti-chevron-up" style="margin-left:auto;font-size:15px;color:#5E9B9A"></i>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <sc-if value="{{d.newRun.manyMethods}}" hint-placeholder-val="{{ false }}">
+                <div>
+                  <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Decoration</div>
+                  <select value="{{d.newRun.methodId}}" onChange="{{ d.newRun.onMethod }}" style="width:100%;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;font-size:12px;color:#ECEAE4;outline:none">
+                    <sc-for list="{{d.newRun.methodOptions}}" as="m" hint-placeholder-count="2"><option value="{{m.id}}">{{m.name}}</option></sc-for>
+                  </select>
+                </div>
+              </sc-if>
+              <div>
+                <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Press</div>
+                <select value="{{d.newRun.pressId}}" onChange="{{ d.newRun.onPress }}" style="width:100%;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;font-size:12px;color:#ECEAE4;outline:none">
+                  <option value="">Pick a press…</option>
+                  <sc-for list="{{d.newRun.pressOptions}}" as="p" hint-placeholder-count="4"><option value="{{p.id}}">{{p.name}}</option></sc-for>
+                </select>
+              </div>
+              <div>
+                <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Scheduled Start</div>
+                <div style="display:flex;gap:7px">
+                  <input type="date" value="{{d.newRun.startDate}}" onInput="{{ d.newRun.onStartDate }}" style="flex:1;min-width:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none">
+                  <select value="{{d.newRun.startTime}}" onChange="{{ d.newRun.onStartTime }}" style="width:118px;flex-shrink:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none"><option value="">Time…</option><sc-for list="{{d.newRun.timeOptions}}" as="tt" hint-placeholder-count="96"><option value="{{tt.value}}">{{tt.label}}</option></sc-for></select>
+                </div>
+              </div>
+              <div>
+                <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Scheduled End</div>
+                <div style="display:flex;gap:7px">
+                  <input type="date" value="{{d.newRun.endDate}}" onInput="{{ d.newRun.onEndDate }}" style="flex:1;min-width:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none">
+                  <select value="{{d.newRun.endTime}}" onChange="{{ d.newRun.onEndTime }}" style="width:118px;flex-shrink:0;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 8px;font-size:12px;color:#ECEAE4;outline:none"><option value="">Time…</option><sc-for list="{{d.newRun.timeOptions}}" as="tt" hint-placeholder-count="96"><option value="{{tt.value}}">{{tt.label}}</option></sc-for></select>
+                </div>
+              </div>
+              <!-- 2026-10-23 (Anthony): Calendar check -- every run already on this press that day; an overlap is refused. -->
+              <sc-if value="{{d.newRun.pcBox.pcShown}}" hint-placeholder-val="{{ false }}">
+                <div style="background:#101014;border:1px solid {{d.newRun.pcBox.pc.boxBorder}};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:6px">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><i class="ti ti-calendar-search" style="color:var(--text-tertiary);font-size:13px"></i><span style="font:600 10px/1 'Oswald';letter-spacing:.1em;text-transform:uppercase;color:var(--text-tertiary)">Calendar check</span><span style="font:500 11px/1 'Archivo';color:var(--text-secondary)">{{d.newRun.pcBox.pc.title}}</span><a href="{{d.newRun.pcBox.pcUrl}}" target="_blank" rel="noopener" style="margin-left:auto;font:600 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:#5E9B9A;text-decoration:none;white-space:nowrap">Open calendar <i class="ti ti-arrow-up-right"></i></a></div>
+                  <sc-if value="{{d.newRun.pcBox.pc.hasNote}}" hint-placeholder-val="{{ false }}"><div style="font:400 11px/1.4 'Archivo';color:var(--text-tertiary)">{{d.newRun.pcBox.pc.note}}</div></sc-if>
+                  <sc-for list="{{d.newRun.pcBox.pc.rows}}" as="pr" hint-placeholder-count="2"><div style="display:flex;gap:8px;align-items:center;font:400 11px/1.35 'Archivo';color:{{pr.color}};background:{{pr.bg}};border:1px solid {{pr.border}};border-radius:7px;padding:6px 8px"><span style="min-width:122px;font-weight:600">{{pr.time}}</span><span style="flex:1;min-width:0">{{pr.text}}</span><sc-if value="{{pr.clash}}" hint-placeholder-val="{{ false }}"><span style="font:700 9px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;white-space:nowrap">{{pr.badge}}</span></sc-if></div></sc-for>
+                  <sc-if value="{{d.newRun.pcBox.pc.showEmpty}}" hint-placeholder-val="{{ false }}"><div style="font:400 11px/1.4 'Archivo';color:var(--text-faint)">{{d.newRun.pcBox.pc.emptyText}}</div></sc-if>
+                  <sc-if value="{{d.newRun.pcBox.pc.hasClash}}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:6px;align-items:flex-start;font:600 11px/1.4 'Archivo';color:#E8A89F"><i class="ti ti-alert-triangle" style="margin-top:1px"></i><span>{{d.newRun.pcBox.pc.clashText}}</span></div></sc-if>
+                  <sc-if value="{{d.newRun.pcBox.pc.hasOk}}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:6px;align-items:center;font:600 11px/1.3 'Archivo';color:#BBD382"><i class="ti ti-check"></i><span>{{d.newRun.pcBox.pc.okText}}</span></div></sc-if>
+                </div>
+              </sc-if>
+              <sc-if value="{{d.newRun.locationShown}}" hint-placeholder-val="{{ true }}">
+                <div>
+                  <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Print Location</div>
+                  <select value="{{d.newRun.printLocation}}" onChange="{{ d.newRun.onPrintLocation }}" style="width:190px;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;font-size:12px;color:#ECEAE4;outline:none">
+                    <option value="">— Not set —</option>
+                    <sc-for list="{{d.newRun.locationOptions}}" as="loc" hint-placeholder-count="3"><option value="{{loc}}">{{loc}}</option></sc-for>
+                  </select>
+                </div>
+              </sc-if>
+              <sc-if value="{{d.newRun.alsoShown}}" hint-placeholder-val="{{ false }}">
+                <div>
+                  <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Also Prints On <span style="text-transform:none;letter-spacing:0;font:400 10px/1 'Archivo';color:var(--text-muted)">· same design, same run, counted once</span></div>
+                  <div style="display:flex;flex-wrap:wrap;gap:6px;max-width:320px">
+                    <sc-for list="{{d.newRun.alsoChips}}" as="a" hint-placeholder-count="2"><button type="button" onClick="{{ a.onToggle }}" style="font:600 10px/1 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:{{a.textColor}};background:{{a.bg}};border:1px solid {{a.border}};border-radius:7px;padding:8px 10px;cursor:pointer">{{a.mark}}{{a.label}}</button></sc-for>
+                  </div>
+                </div>
+              </sc-if>
+              <div>
+                <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:5px">Scheduled Qty</div>
+                <input type="number" min="1" value="{{d.newRun.qty}}" onInput="{{ d.newRun.onQty }}" style="width:140px;background:#16161a;border:1px solid #2a2a2f;border-radius:7px;padding:9px 11px;font-size:12px;color:#ECEAE4;outline:none">
+                <sc-if value="{{d.newRun.hasQtyHint}}" hint-placeholder-val="{{ false }}"><div style="display:inline-flex;align-items:center;gap:5px;font:400 10px/1.3 'Archivo';color:var(--text-tertiary);margin-top:6px"><i class="ti ti-shirt" style="font-size:12px;color:var(--text-muted)"></i>{{d.newRun.qtyHint}}</div></sc-if>
+              </div>
+              <button onClick="{{ d.newRun.onSave }}" disabled="{{d.newRun.busy}}" style="width:100%;display:inline-flex;align-items:center;justify-content:center;gap:7px;font:700 11px/1 'Oswald';letter-spacing:.07em;text-transform:uppercase;color:#08080A;background:#5E9B9A;border:none;border-radius:9px;padding:13px;cursor:pointer;margin-top:2px" style-hover="filter:brightness(1.1)"><i class="ti ti-plus"></i>{{d.newRun.saveLabel}}</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{d.hasRunErr}}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px;font:600 10px/1.3 'Oswald';letter-spacing:.03em;text-transform:uppercase;color:#E8A89F;background:#2A100D;border:1px solid #7A241C;border-radius:9px;padding:11px 13px;margin-top:9px"><i class="ti ti-alert-triangle"></i>{{d.runErr}}</div></sc-if>
+        <sc-if value="{{d.hasRunMsg}}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:flex-start;gap:7px;font:500 11px/1.5 'Archivo';color:#BBD382;background:#18230D;border:1px solid #3D5418;border-radius:9px;padding:10px 13px;margin-top:9px"><i class="ti ti-check"></i>{{d.runMsg}}</div></sc-if>
+      </div>
+
+      <sc-if value="{{d.hasNotes}}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font:500 10px/1 'Oswald';letter-spacing:.13em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">Account Manager Notes</div>
+          <div style="background:#101013;border:1px solid #202024;border-radius:10px;padding:14px;font:400 12px/1.5 'Archivo';color:var(--text-secondary);font-style:italic">{{d.notes}}</div>
+        </div>
+      </sc-if>
+    </div>
+  </aside>
+</sc-if>
+
+<!-- ── Salesforce environment ─────────────────────────────────────────── -->
+<sc-if value="{{sfEnvOpen}}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;inset:0;z-index:96;background:rgba(6,6,7,.82);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="width:100%;max-width:440px;background:#0D0D0F;border:1px solid #1f1f23;border-radius:18px;box-shadow:0 40px 90px -30px rgba(0,0,0,.8);position:relative">
+      <div style="display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid #1f1f23">
+        <div>
+          <div style="font:600 17px/1.1 'Oswald';color:#ECEAE4">Salesforce Environment</div>
+          <div style="font:400 11px/1.4 'Archivo';color:var(--text-muted);margin-top:4px">Switches which org every tablet talks to — applies to everyone immediately.</div>
+        </div>
+        <button onClick="{{ onCloseSfEnv }}" style="margin-left:auto;flex-shrink:0;width:32px;height:32px;border-radius:9px;background:#16161a;border:1px solid #2a2a2f;color:var(--text-secondary);cursor:pointer;font-size:15px" style-hover="color:#ECEAE4;border-color:#3a3a40"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{sfEnvOptions}}" as="e" hint-placeholder-count="3">
+            <button onClick="{{ e.onPick }}" style="display:flex;align-items:center;gap:10px;text-align:left;background:{{e.bg}};border:1px solid {{e.border}};border-radius:10px;padding:12px 14px;cursor:{{e.cursor}}">
+              <span style="width:9px;height:9px;border-radius:50%;background:{{e.dotColor}};flex-shrink:0"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font:600 13px/1.1 'Oswald';color:{{e.textColor}}">{{e.label}}</div>
+                <div style="font:400 10px/1.3 'Archivo';color:var(--text-muted);margin-top:3px">{{e.statusLabel}}</div>
+              </div>
+              <sc-if value="{{e.isActive}}" hint-placeholder-val="{{ false }}"><span style="font:600 8px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:#7FA644;background:#18230D;border:1px solid #3D5418;border-radius:6px;padding:4px 7px;flex-shrink:0">Active</span></sc-if>
+            </button>
+          </sc-for>
+        </div>
+
+        <div>
+          <div style="font:600 9px/1 'Oswald';letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:6px">Switch PIN</div>
+          <input type="password" value="{{sfEnvPin}}" onInput="{{ onSfEnvPin }}" placeholder="Enter PIN to confirm switch" style="width:100%;background:#121215;border:1px solid #232327;border-radius:9px;padding:11px 13px;font-size:13px;color:#ECEAE4;outline:none">
+        </div>
+
+        <sc-if value="{{sfEnvHasMsg}}" hint-placeholder-val="{{ false }}"><div style="display:inline-flex;align-items:center;gap:7px;font:600 11px/1 'Oswald';letter-spacing:.05em;text-transform:uppercase;color:#BBD382;background:#18230D;border:1px solid #3D5418;border-radius:9px;padding:10px 13px"><i class="ti ti-check"></i>{{sfEnvMsg}}</div></sc-if>
+        <sc-if value="{{sfEnvHasErr}}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px;font:600 11px/1.3 'Oswald';letter-spacing:.03em;text-transform:uppercase;color:#E8A89F;background:#2A100D;border:1px solid #7A241C;border-radius:9px;padding:12px 14px"><i class="ti ti-alert-triangle"></i>{{sfEnvErr}}</div></sc-if>
+
+        <button onClick="{{ onSubmitSfEnv }}" style="width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px;font:700 12px/1 'Oswald';letter-spacing:.09em;text-transform:uppercase;color:#fff;background:#C6372B;border:none;border-radius:11px;padding:16px;cursor:pointer" style-hover="filter:brightness(1.1)"><i class="ti ti-repeat"></i>{{sfEnvSubmitLabel}}</button>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<!-- ── identity gate ──────────────────────────────────────────────────── -->
+<sc-if value="{{nameGateOpen}}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;inset:0;z-index:90;background:rgba(6,6,7,.82);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="width:100%;max-width:380px;background:#0D0D0F;border:1px solid #1f1f23;border-radius:18px;padding:34px 30px;text-align:center;box-shadow:0 40px 90px -30px rgba(0,0,0,.8);position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;right:0;height:4px;background:#C6372B"></div>
+      <div style="width:52px;height:52px;border-radius:14px;background:#1a1a1e;border:1px solid #2a2a2f;display:flex;align-items:center;justify-content:center;margin:0 auto 18px"><i class="ti ti-user" style="color:#C6372B;font-size:26px"></i></div>
+      <div style="font:600 21px/1.1 'Oswald';color:#ECEAE4;margin-bottom:8px">Who's this?</div>
+      <div style="font:400 12px/1.5 'Archivo';color:var(--text-tertiary);margin-bottom:20px">Enter your PIN so changes made this shift can be traced back to you.</div>
+      <div style="display:flex;justify-content:center;gap:12px;margin-bottom:8px;animation:{{gateShakeAnim}}">
+        <sc-for list="{{gateDots}}" as="d" hint-placeholder-count="4">
+          <div style="width:13px;height:13px;border-radius:50%;border:2px solid {{d.border}};background:{{d.bg}};transition:all .12s"></div>
+        </sc-for>
+      </div>
+      <div style="height:18px;text-align:center;font:600 10px/18px 'Oswald';letter-spacing:.06em;text-transform:uppercase;color:{{gateStatusColor}};margin-bottom:12px">{{gateStatusText}}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px">
+        <sc-for list="{{gatePad}}" as="p" hint-placeholder-count="12">
+          <button onClick="{{ p.onPress }}" style="background:{{p.bg}};border:1px solid {{p.border}};color:{{p.color}};font:600 20px/1 'Oswald';border-radius:10px;padding:16px 0;cursor:pointer"><sc-if value="{{p.isIcon}}" hint-placeholder-val="{{ false }}"><i class="ti {{p.icon}}"></i></sc-if><sc-if value="{{p.isText}}" hint-placeholder-val="{{ true }}">{{p.label}}</sc-if></button>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#C6372B"/><text x="50" y="60" font-family="Oswald,Arial" font-size="30" font-weight="700" fill="#fff" text-anchor="middle" letter-spacing="2">CA</text><text x="50" y="78" font-family="Arial" font-size="8" font-weight="700" fill="#fff" text-anchor="middle" letter-spacing="1">CALENDAR</text></svg></template>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props="{}">
+/**
+ * Production Calendar.
+ *
+ * Reads /api/calendar, which returns every order printing in the window with a
+ * computed 1-10 priority, a prep status, any runs already scheduled, and -- for
+ * anything unscheduled -- a suggested press and time slot. Managers drag a job
+ * onto a press; the run endpoints then roll Order.Print_Date__c up from the runs
+ * themselves (_print-date-rollup.js), so the calendar and the rest of the app can
+ * never disagree about when something prints -- and neither can the other boards.
+ *
+ * CHROME. Every visual token here is lifted from index.html rather than invented:
+ * same header, same slide-out nav, same KPI tiles, same drawer, same env modal,
+ * same PIN gate, same Tabler v3 icon font. This board originally shipped its own
+ * :root palette and Tabler v2, which is why it looked like a different product
+ * and why every nav icon fell back to the same glyph.
+ *
+ * There IS a shared stylesheet now: tokens.css (E10.2). Surfaces, borders, the
+ * text scale and the status colours are tokens, so a colour changes in one file
+ * for all nine pages. The chrome STRUCTURE is still copied from index.html and
+ * still has to be kept in step by hand -- tokens.css carries values, not
+ * layout.
+ *
+ * SANITISING. GOA_Order_Number__c, Customer_Order_Name__c and friends are
+ * Salesforce FORMULA fields, and in dev2 several of them return HYPERLINK()
+ * markup -- literally `<a href="/801ca...">20485-3</a>`. Every other board pipes
+ * those through CAApi.text(), which strips the tags. This one did not, so a real
+ * order rendered its own anchor tag as visible text. Anything that comes out of
+ * a formula field goes through t() below. No exceptions.
+ */
+const SHOP_START = 7, SHOP_END = 16, HOURS = SHOP_END - SHOP_START;
+const REFRESH_MS = 20000;
+
+/* App chrome tokens, copied from index.html so the two can be diffed by eye. */
+const INK = '#ECEAE4', MUT = 'var(--text-secondary)', DIM = 'var(--text-muted)', FAINT = 'var(--text-faint)';
+const RED = '#C6372B', GREEN = '#7FA644', AMBER = '#E0B870', CRIT = '#E24A3A', PURPLE = '#9878C0';
+
+/* The four score contributions are parts of ONE total, always rendered in the
+   same order (the four inputs of Anthony's diagram, left to right), so this is
+   an ordinal ramp rather than a categorical palette -- position identifies the
+   slot, lightness carries the order. Validated with the dataviz skill's
+   validate_palette.js --ordinal against surface #0D0D0F: monotone lightness,
+   all adjacent dL >= 0.06, dark end 3.28:1 vs surface, single hue (the brand
+   red's own hue, 29deg). A categorical four-hue set cannot pass here: any
+   red/green pair at equal lightness collapses under deuteranopia, which is what
+   the previous palette did on all-pairs. */
+/* ── how a run's scheduling status reads on the board ──────────────────────
+   Auto_Scheduling_Status__c has four values. Since the Confirm step was removed
+   (2026-08-21) they collapse into two things a manager sees:
+
+     confirmed  A human's run, on the Salesforce calendar -- and in production
+                that syncs straight to Google. Solid and purple. This is what
+                EVERY run created through these dashboards is, from the moment
+                it exists: creating a run publishes it.
+     auto       Proposal / Unable to auto-schedule / blank. The machine put it
+                there and will move it again on the next save. Dashed and
+                dimmed -- a suggestion, not a booking. Still reachable, because
+                the Apex auto-scheduler writes these itself.
+
+   'Planned' is deliberately still handled below, and deliberately no longer
+   amber. It used to mean "placed but not announced" -- the private middle state
+   the Confirm button existed to resolve. Nothing aims for that state now (the
+   create path passes through it for a single write; see _run-schedule-status.js),
+   so a run still sitting on Planned is one whose publish FAILED. It therefore
+   reads as unpublished, in the same dim/dashed treatment as a machine
+   suggestion, with a label that says so rather than implying someone still has
+   a button to press. Err that way: claiming something is on the shop calendar
+   when it isn't is the failure that gets a job missed. */
+const RUN_PLANNED = 'Planned', RUN_CONFIRMED = 'Confirmed';
+function schedState(r){
+  const s = r && r.Auto_Scheduling_Status__c;
+  if (s === RUN_CONFIRMED) return {
+    key:'confirmed', published:true, accent:PURPLE, border:'solid', opacity:'1',
+    label:'On the shop calendar',
+  };
+  if (s === RUN_PLANNED) return {
+    key:'planned', published:false, accent:DIM, border:'dashed', opacity:'.86',
+    label:'Not on the shop calendar — publishing failed',
+  };
+  /* Label audit 2026-09-30: the scheduler TRIED and found no slot. Same dashed
+     "not booked" treatment, but amber and its own words, so it no longer reads
+     as a suggestion the machine made. */
+  if (s === 'Unable to auto-schedule') return {
+    key:'auto', unable:true, published:false, accent:AMBER, border:'dashed', opacity:'.86',
+    label:'Not on the shop calendar — the auto-scheduler found no free slot',
+  };
+  return {
+    key:'auto', published:false, accent:DIM, border:'dashed', opacity:'.86',
+    label:'Suggested by the auto-scheduler — it may move again',
+  };
+}
+
+const RAMP = ['#F5A695', '#DA8674', '#BE6755', '#A24937'];
+const PART_LABELS = ['Urgency', 'AM rating', 'Prep', 'Firm'];
+
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this._api = window.CAApi;
+
+    // Demo fixtures. Any failure to reach /api/calendar lands here and flips the
+    // badge -- same contract as every other board, so a tablet that cannot see
+    // Salesforce shows something explorable rather than an empty grid.
+    this._demo = {
+      presses:[{Id:'p1',Name:'Press 1',group:'press1'},{Id:'p2',Name:'Press 2',group:'press2'},
+               {Id:'p3',Name:'Embroidery Machine',group:'embroidery'},
+               {Id:'p4',Name:'Hat Press',group:'heat'},{Id:'p5',Name:'Shirt Press',group:'heat'}],
+      // Mirrors what calendar/index.js sends. Demo only -- the real grouping
+      // rules live in _priority.js and are resolved server-side.
+      pressGroups:[
+        {key:'press1', label:'Press 1', methodTypes:['Screen Print'], pressIds:['p1']},
+        {key:'press2', label:'Press 2', methodTypes:['Screen Print'], pressIds:['p2']},
+        {key:'embroidery', label:'Embroidery', methodTypes:['Embroidery'], pressIds:['p3']},
+        {key:'heat', label:'Heat Press', methodTypes:['Heat Press'], pressIds:['p4','p5']},
+      ],
+      pressesUngrouped:0,
+      records:[
+        this._demoOrder('20962','Phil Waldrep Ministries','WOJ Fall Tees',0,8.8,0,'Screen Print','p1','07:00',2),
+        this._demoOrder('19869','Piney River Resort','River Tees',0,8.8,0,'Screen Print','p1','10:30',1.5),
+        this._demoOrder('21027','CrossFit Goose Creek','Logo Tee',0,7.5,50,'Screen Print','p2','07:00',1.5),
+        this._demoOrder('20877','Learning Zone','Play The Day Away',0,8.8,0,'Screen Print',null,null,1,['Press 2','08:30','p2']),
+        this._demoOrder('21215','KLIFE','Embroidered Crewneck',0,6.1,100,'Embroidery','p3','07:30',5.5),
+        this._demoOrder('21217','Bean Wandering Coffee','L/S Camo Tees',1,7.0,0,'Screen Print',null,null,1.5,['Press 1','09:00','p1']),
+        this._demoOrder('20611','Church of The City','We Are The Village',1,5.9,100,'Screen Print','p1','13:00',2.5),
+      ],
+    };
+    /* 2026-10-23: calendar.html?date=YYYY-MM-DD opens Day view on that day -- the New Run forms'
+       "Open calendar" link (Calendar check). Without it: the current week, as before. */
+    const _cd=(()=>{ try{ const m=/[?&]date=(\d{4})-(\d{2})-(\d{2})/.exec((typeof location!=='undefined'&&location.search)||''); if(!m) return null; const t=new Date(+m[1],+m[2]-1,+m[3]); const n=new Date(); n.setHours(0,0,0,0); return isNaN(t)?null:{ offset:Math.round((t-n)/86400000) }; }catch(_){ return null; } })();
+    this.state = {
+      // Opens on the WHOLE current working week, not a single day. A shop
+      // manager's first question is "what does this week look like" -- Day view
+      // is the drill-down, not the landing page.
+      conn:'loading', loadErr:'', loadErrFinal:false, data:null, view:_cd?'day':'week', anchor:_cd?_cd.offset:0, q:'', group:'all',
+      openId:null, dragging:null, overKey:null, navOpen:false,
+      /* Garment breakdown for the open drawer (E1.5). Fetched per order
+         when the drawer opens rather than bulk-loaded with the board:
+         /api/calendar already runs an OrderItem roll-up and adding
+         Size__c/Color__c/Product2.Name to it would put the whole
+         calendar behind a SELECT that empties on one FLS surprise. A
+         drawer is a deliberate click; the board is the thing that must
+         never go blank. Cached by order Id so reopening is instant, and
+         never invalidated -- an order's line items do not change while
+         somebody is looking at the week. */
+      sizes:{}, sizesBusy:null, sizesErr:{},
+      // Which AM suggestion the open drawer's Create Run form was filled from,
+      // so it can be stamped Accepted once the real run exists.
+      proposalUsedId:null,
+      // Proposals the manager has already acted on in THIS session. "Use this"
+      // marks the suggestion Accepted on the server, and the server-side
+      // ride-along only sends Proposed rows -- so after the next load these are
+      // gone on their own. This list is what makes them disappear at the click
+      // rather than at the refresh. If the write fails the id comes back out,
+      // because a suggestion nobody actually recorded a decision on must not
+      // look decided.
+      hiddenProposalIds:[],
+      // The Add A Run form starts COLLAPSED. Most of the time a manager opens
+      // an order to look at it, not to book press time -- and the expanded form
+      // is seven controls tall, which pushed the runs that already exist, the
+      // AM's suggestions, and the open pre-production items off the bottom of
+      // the drawer. It expands on demand, and expands itself whenever something
+      // fills it in (see useProposal).
+      newRunOpen:false,
+      // Outstanding shortfalls -- garments counted but never printed, needing a
+      // make-up run. Keyed by ORDER id here (index.html keys the same data by
+      // method, since its cards are methods). Own fetch path, see loadShortfall.
+      shortfalls:{}, shortfallTotal:0,
+      runEdits:{}, runBusy:null, runErr:'', runMsg:'',
+      sfEnvOpen:false, sfEnvPin:'', sfEnvMsg:'', sfEnvErr:'', sfEnvPick:null, sfEnvSubmitting:false, env:null,
+      nameOk:false, gatePin:'', gateErr:'', gateSubmitting:false, gateShake:false,
+      now:new Date(),
+    };
+  }
+
+  // `sug` is [pressName, 'HH:MM'] for the unscheduled ones. It is passed in
+  // rather than hardcoded because the real endpoint RESERVES each slot as it
+  // hands it out -- two orders can never be offered the same press at the same
+  // hour -- and a fixture that showed them all landing on Press 2 at 11 would
+  // teach the opposite of the guarantee.
+  _demoOrder(num,cust,job,dayOff,score,ready,method,press,start,dur,sug){
+    return {
+      Id:'o'+num, GOA_Order_Number__c:num, Customer_Order_Name__c:job,
+      Account:{Name:cust}, Duration__c:dur, TotalQuantity:Math.round(dur*120),
+      priority:{score, days:dayOff, ready:ready/100,
+        contributions:{urgency:score*0.45,amRating:score*0.3,prepRisk:score*0.25,firm:0}},
+      prep:{key: ready>=100?'good':(dayOff>=3?'good':(dayOff>=1?'warn':'crit')),
+            label: ready>=100?'Ready':(dayOff>=3?'Great':(dayOff>=1?'Mediocre':'Very bad'))},
+      // Placements added 2026-08-20 so the demo exercises the Print Location
+      // picker's method-scoping instead of always falling back to all thirteen.
+      ProductionMethods:[{Id:'m'+num, Type__c:method, Placements:['Front','Back']}],
+      ProductionRuns: press ? [{Id:'r'+num, Press__c:press, Press:null,
+        Scheduled_Start__c:this._demoIso(dayOff,start),
+        Scheduled_End__c:this._demoIso(dayOff,start,dur),
+        Quantity_Planned_c__c:Math.round(dur*120), Print_Location__c:'Front',
+        PrintMethod__c:'m'+num,
+        LastModifiedDate:this._demoIso(dayOff,'06:00'),
+        // CHANGED 2026-08-21: 19869 used to be 'Planned' to exercise the amber
+        // styling. Planned is no longer a state anyone aims for -- it now means
+        // "publish failed" -- so one fixture keeps it deliberately, to make the
+        // red not-on-the-calendar warning visible in demo mode. 21215 goes back
+        // to Confirmed, which is what a normal run looks like now. A state that
+        // only ever appears against a live org is a state nobody looks at until
+        // it is wrong in front of a customer.
+        Auto_Scheduling_Status__c: num==='20611' ? 'Proposal'
+                                 : (num==='19869' ? 'Planned' : 'Confirmed')}] : [],
+      needsScheduling: !press,
+      // One finished job in the fixtures so the greyed treatment is visible in
+      // demo mode. Same reasoning as the Planned run and the AM proposal: a
+      // state that only ever appears against a live org is a state nobody
+      // looks at until it is wrong in front of a customer.
+      Done: num==='21027',
+      // One unscheduled job carries an AM suggestion so the queue badge and the
+      // drawer panel are visible in demo mode. Without a fixture, the whole
+      // proposals path would only ever be exercised against a live org --
+      // which is how the lane-packing bug hid for as long as it did.
+      // Two outstanding prep items on the job printing today, so the block chip
+      // and the drawer list are both exercised in demo mode.
+      OpenPrepItems: num==='20962' ? [
+        {id:'i1', name:'PPI-1', type:'Screen', status:'In Progress', methodId:'m1', methodType:'Screen Print', detail:'156 mesh', station:'screen', stage:'Ready for Exposure'},
+        {id:'i2', name:'PPI-2', type:'Ink', status:'Not Started', methodId:'m1', methodType:'Screen Print', detail:'PMS 186 C', station:'ink', stage:'Needs Mixing'},
+        // No station exists for Thread -- proves the no-link path renders.
+        {id:'i3', name:'PPI-3', type:'Thread', status:'Not Started', methodId:'m2', methodType:'Embroidery', detail:'Isacord 0010', station:null, stage:null},
+      ] : [],
+      Proposals: num==='20877' ? [{
+        id:'p1', name:'PROP-0001', machineGroup:'Screen Print', printLocation:'Left Chest',
+        // 'p2' is a real id in _demo.presses above, so the prefill guard
+        // passes and demo mode exercises the carry-through rather than the
+        // fallback. Mirrors what proposed-runs/index.js now returns.
+        pressId:'p2', pressName:'Press 2',
+        proposedStart:this._demoIso(1,'09:00'), proposedHours:2, quantity:180,
+        notes:'Customer asked for these before the rest of the order.',
+        proposedBy:'Chief AM',
+      }] : [],
+      suggestion: press ? null : {start:this._demoIso(dayOff,(sug&&sug[1])||'11:00'),
+                                  end:this._demoIso(dayOff,(sug&&sug[1])||'11:00',dur),
+                                  pressId:(sug&&sug[2])||'p2',
+                                  pressName:(sug&&sug[0])||'Press 2'},
+      Priority_Notes__c: num==='20962' ? 'Booster club pickup is Friday morning.' : null,
+    };
+  }
+  _demoIso(dayOff, hhmm, addHours){
+    const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+dayOff);
+    const p = String(hhmm).split(':'); d.setHours(+p[0], +p[1]||0, 0, 0);
+    if (addHours) d.setTime(d.getTime()+addHours*3600000);
+    return d.toISOString();
+  }
+
+  /** Strip HTML that Salesforce formula fields hand back. See the header note. */
+  t(v){
+    const api=this._api;
+    if (api && api.text) return api.text(v);
+    return v==null ? '' : String(v).replace(/<[^>]*>/g,'').trim();
+  }
+
+  /* ── lifecycle ─────────────────────────────────────────────────────── */
+  componentDidMount(){
+    const api = this._api;
+    this.setState({ nameOk: !!(api && api.anyWorkerName && api.anyWorkerName()) });
+    this.fg(()=>this.load());
+    this.bg(()=>this.loadEnv());
+    this.bg(()=>this.loadShortfall());
+    this._sr = setInterval(()=>this.bg(()=>this.loadShortfall()), 30000);
+    this._t  = setInterval(()=>this.setState({now:new Date()}), 1000);
+    this._ar = setInterval(()=>{
+      // Never refresh mid-drag or with a drawer open -- a re-render underneath a
+      // drag cancels it, and under a drawer it silently swaps what you're reading.
+      // bg() also keeps the centre-screen loading overlay down for these ticks.
+      // shouldPoll() (ca-api.js) keeps a live board on every tick and retries a
+      // demo board every 5th, so losing the API is no longer permanent.
+      if (!this.state.openId && !this.state.dragging && ((window.CAApi&&window.CAApi.shouldPoll)?window.CAApi.shouldPoll(this.state.conn,'calendar'):this.state.conn==='live')) this.bg(()=>this.load());
+    }, REFRESH_MS);
+    /* Escape during a drag. The browser fires dragend for a cancelled drag, but
+       only once the pointer is released -- a worker who hits Escape and then
+       lets go over a slot would otherwise still drop. Clearing here makes the
+       key take effect immediately; the dragend that follows is a no-op. */
+    this._esc = (e)=>{ if(e.key==='Escape') this.endDrag(); };
+    window.addEventListener('keydown', this._esc);
+  }
+  // See ca-api.js's overlay notes. The first load() above stays unwrapped --
+  // that is the one the user is actually waiting on.
+  bg(fn){ const a=this._api||window.CAApi; return (a&&a.backgroundLoad) ? a.backgroundLoad(fn) : fn(); }
+  // fg() is the opposite of bg(): it DOES show the centre-screen overlay.
+  // Reserved for a board's first load -- the far half of "switching
+  // dashboards". Every later refresh, save and drawer-open stays silent.
+  // See the header comment in ca-api.js.
+  fg(fn){ const a=this._api||window.CAApi; return (a&&a.foregroundLoad) ? a.foregroundLoad(fn) : fn(); }
+  componentWillUnmount(){
+    clearInterval(this._t); clearInterval(this._ar); clearInterval(this._sr);
+    if(this._esc) window.removeEventListener('keydown', this._esc);
+  }
+  /* Ends a drag, however it ended. state.dragging used to be cleared in exactly
+     one place -- the tail of a SUCCESSFUL commitDrop -- so a drag dropped on
+     nothing, cancelled with Escape, or abandoned because pressForDrop() found no
+     press left it set forever. That is not cosmetic: the 20s auto-refresh above
+     is gated on !this.state.dragging, so the board silently stopped refreshing
+     for the rest of the session, and the next hour-slot drop still had a stale
+     order in hand. index.html has always cleared its own drag state on
+     dragend (see onDragEnd there); this is the same idea with the two extra
+     exits this board has. Safe to call twice -- drop fires before dragend, so
+     it usually IS called twice. */
+  endDrag(){
+    if(!this.state.dragging && !this.state.overKey) return;
+    this.setState({dragging:null, overKey:null});
+  }
+
+  async load(){
+    /* Demo fixtures are opt-in (?demo=1) as of 2026-09-21 -- never a fallback.
+       A press calendar full of invented bookings is how a real press gets
+       double-booked. */
+    if (window.CAApi && window.CAApi.demoRequested && window.CAApi.demoRequested()) {
+      this.setState({data:this._demo, conn:'demo', loadErr:''});
+      return;
+    }
+    try{
+      const {from,to} = this.windowDays();
+      const data = await this.fetchCalendar(from,to);
+      if(window.CAApi&&window.CAApi.loadOk) window.CAApi.loadOk(this); this.setState({data, conn:'live', loadErr:''});
+    }catch(e){
+      if (window.CAApi && window.CAApi.missOnce && window.CAApi.missOnce(this, this.state.conn==='live', e)) return;
+      console.error('calendar load failed', e);
+      const f = (window.CAApi && window.CAApi.connFailure)
+        ? window.CAApi.connFailure(e)
+        : { connection:'error', message:'the request did not come back.', isConfig:false };
+      /* data:null, not fixtures. Every render path already guards on a null
+         data (it is the pre-first-load state), so the grid comes up empty and
+         the bar below says why. */
+      this.setState({data:null, conn:f.connection, loadErr:f.message, loadErrFinal:!!f.isConfig});
+    }
+  }
+  /** ca-api.js has no getCalendar() yet, so fall back to a direct same-origin
+   *  fetch. Picks up CAApi's version automatically once one is added. */
+  async fetchCalendar(from,to){
+    const api = this._api;
+    if (api && api.getCalendar) return api.getCalendar(from,to);
+    // /api/calendar has no CAApi wrapper, so this is the one request in the
+    // app that the overlay's jget/jsend/jdel hooks can't see. trackRequest()
+    // counts it by hand -- without it the calendar would be the only board
+    // that never shows a loading state. It also honours bg(): a request
+    // started inside backgroundLoad() is still counted as silent.
+    const doFetch = fetch('/api/calendar?from='+from+'&to='+to, {headers:{Accept:'application/json'}});
+    const r = await (api && api.trackRequest ? api.trackRequest(doFetch) : doFetch);
+    if(!r.ok){
+      /* Same error shape as ca-api.js httpError(): status + the server's JSON
+         body. Without the body, connFailure() could never tell "this org has
+         no Production_Run__c" (409 org_not_configured) or "the runs could not
+         be read" (B13) from a network blip, and the bar said only
+         "calendar_409". */
+      const body = await r.json().catch(()=>null);
+      const err = new Error('calendar_'+r.status);
+      err.status = r.status; err.data = body;
+      err.detail = (body && (body.detail || body.error)) || '';
+      throw err;
+    }
+    return r.json();
+  }
+  async loadEnv(){
+    const api=this._api; if(!api||!api.getSfEnv) return;
+    try{ this.setState({env: await api.getSfEnv()}); }catch(_){}
+  }
+  // Deliberately silent and deliberately separate from load(): an org without
+  // the production-result fields answers available:false, and treating that as
+  // a load failure would flip this whole board to Demo over a KPI tile.
+  async loadShortfall(){
+    const api=this._api; if(!api||!api.getShortfalls) return;
+    try{
+      const d = await api.getShortfalls();
+      if(!d || d.available === false) return;
+      this.setState({ shortfalls: d.byOrder||{}, shortfallTotal: Number(d.totalOutstanding)||0 });
+    }catch(_){}
+  }
+
+  /* ── window maths ──────────────────────────────────────────────────── */
+  dayOf(offset){ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+offset); return d; }
+  windowDays(){
+    const a=this.state.anchor;
+    const v=this.state.view;
+    /* Three views, three window shapes:
+         day    one day, anchored on whatever day you stepped to
+         3day   three CONSECUTIVE days from that same anchor -- a rolling
+                outlook, not a fixed block, so "next" walks forward three at a
+                time rather than jumping to a calendar boundary
+         week   Mon-Sat, snapped to the week the anchor falls in
+
+       3day deliberately does NOT skip Sunday. Skipping it would make the
+       columns non-contiguous, and every piece of block-placement maths below
+       assumes column i is start + i days. A run landing in the wrong column is
+       exactly the kind of bug that looks fine until someone shows up on the
+       wrong day, and an empty Sunday column is honest -- it says nothing runs
+       Sunday, which is true. */
+    const span = v==='day' ? 1 : v==='3day' ? 3 : 6;
+    const start = (v==='day' || v==='3day') ? this.dayOf(a) : this.mondayOf(a);
+    const end = new Date(start); end.setDate(end.getDate()+span-1);
+    const iso = d => d.toISOString().slice(0,10);
+    // Pull a little either side so the queue isn't empty at a window edge.
+    const padStart=new Date(start); padStart.setDate(padStart.getDate()-3);
+    const padEnd=new Date(end); padEnd.setDate(padEnd.getDate()+21);
+    return {from:iso(padStart), to:iso(padEnd), start, end, span};
+  }
+  mondayOf(offset){ const d=this.dayOf(offset); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d; }
+
+  visible(){
+    const d=this.state.data; if(!d||!d.records) return [];
+    const q=(this.state.q||'').toLowerCase();
+    if(!q) return d.records;
+    return d.records.filter(o=>{
+      const hay=[this.t(o.Account&&o.Account.Name), this.t(o.GOA_Order_Number__c),
+                 this.t(o.Customer_Order_Name__c), o.OrderNumber||''].join(' ');
+      return hay.toLowerCase().indexOf(q)>-1;
+    });
+  }
+  /* The org's presses, or NOTHING. This used to fall back to this._demo.presses
+     whenever the server's list came back empty -- which is indistinguishable
+     from a live org that simply has no Press records. The result was fake
+     presses ("Press 1", "Press 2") rendered in live mode, which a manager could
+     drag a real job onto; the run would then be created against an Id that does
+     not exist in that org. An empty live list must read as empty. See
+     noPresses/pressGroups() below and the empty state in the markup. */
+  presses(){
+    const d=this.state.data;
+    if (d && d.presses && d.presses.length) return d.presses;
+    return this.state.conn === 'demo' ? this._demo.presses : [];
+  }
+  /* Same rule for the press GROUPS (the per-calendar chips). Demo groups name
+     demo presses, so leaking them into live mode offers calendars that can
+     never resolve to a real press. */
+  pressGroups(){
+    const d=this.state.data;
+    if (d && d.pressGroups && d.pressGroups.length) return d.pressGroups;
+    return this.state.conn === 'demo' ? (this._demo.pressGroups || []) : [];
+  }
+
+  /* ── writes ────────────────────────────────────────────────────────── */
+  canEdit(){
+    const api=this._api;
+    return !!(api && api.canAccessManagement && api.canAccessManagement());
+  }
+  /**
+   * Commit a drop. Moves or creates the run, then pushes Order.Print_Date__c to
+   * the earliest run start so the order's official date follows the calendar.
+   * Both writes are attempted; a failure on either is surfaced rather than
+   * swallowed, because a half-applied drag is worse than a rejected one.
+   */
+  /**
+   * Which press does a drop land on, now that the grid's rows are hours rather
+   * than presses? The old grid answered this by which lane you dropped into.
+   *
+   *  - On a single-press calendar (Press 1, Press 2, Embroidery): that press.
+   *  - On Heat Press, which covers Hat Press AND Shirt Press: whichever of them
+   *    is free at that hour, else the first. Two machines, one calendar -- the
+   *    manager picked the station, not the machine.
+   *  - On Master, there is no press in the click. Fall back to the order's own
+   *    suggested press, then to any press whose group accepts this order's
+   *    method type. Only if nothing fits do we ask -- and we say which tab to
+   *    use rather than just refusing.
+   */
+  /* AU-12 (10-13): `run` = the run being moved (null for a queue card).
+     A moved run KEEPS ITS PRESS -- the manager dragged it to a new time, not a
+     new machine. It only changes press when its own press is not on this tab,
+     or another run really holds that press at the new time; then it takes a
+     free press from the same calendar, and if none is free it stays put.
+     The busy check ignores the dragged run itself (it used to count the run's
+     own old slot as "taken") and measures with the run's own length. */
+  pressForDrop(order, when, run){
+    const st=this.state, presses=this.presses();
+    const groups=this.pressGroups();
+    const ownLen=this.durationOf(order, run);
+    const own=(run && run.Press__c) || null;
+    const busyAt=(pressId)=>{
+      const t0=when.getTime(), t1=t0+ownLen*3600000;
+      return (this.visible()||[]).some(o=>(o.ProductionRuns||[]).some(r=>
+        (!run || r.Id!==run.Id) &&
+        r.Press__c===pressId && r.Scheduled_Start__c &&
+        Date.parse(r.Scheduled_Start__c) < t1 &&
+        Date.parse(r.Scheduled_End__c||r.Scheduled_Start__c) > t0));
+    };
+    const keepOrSwap=(ids)=>{
+      if(!busyAt(own)) return own;
+      return ids.filter(id=>id!==own && !busyAt(id))[0] || own;
+    };
+    if(st.group && st.group!=='all'){
+      const g=groups.filter(x=>x.key===st.group)[0];
+      const ids=(g&&g.pressIds)||[];
+      if(!ids.length){ alert('No press is mapped to this calendar yet.'); return null; }
+      if(own && ids.indexOf(own)>-1) return keepOrSwap(ids);
+      return ids.filter(id=>!busyAt(id))[0] || ids[0];
+    }
+    if(own){
+      const g=groups.filter(x=>(x.pressIds||[]).indexOf(own)>-1)[0];
+      return keepOrSwap((g&&g.pressIds)||[own]);
+    }
+    const sug=order.suggestion;
+    if(sug && sug.pressId) return sug.pressId;
+    const types=(order.ProductionMethods||[]).map(m=>String((m&&m.Type__c)||'').trim());
+    for(const g of groups){
+      if(!types.some(ty=>(g.methodTypes||[]).indexOf(ty)>-1)) continue;
+      const ids=g.pressIds||[];
+      const free=ids.filter(id=>!busyAt(id))[0] || ids[0];
+      if(free) return free;
+    }
+    const any=presses[0];
+    if(any) return any.Id;
+    alert('There is no press to schedule this on. Open the calendar for the station you want and drop it there.');
+    return null;
+  }
+
+  /* AU-11 (10-13): runId = the block that was actually dragged. Without it
+     every drop moved order.ProductionRuns[0], so on an order with a front and
+     a back run, dragging the back moved the front. Queue cards have no run of
+     their own and still pass none (unchanged behaviour). */
+  async commitDrop(order, pressId, startDate, runId){
+    const api=this._api;
+    if(this.state.conn!=='live'){ alert('Not connected to Salesforce — nothing was saved.'); return; }
+    if(!this.canEdit()){ alert('Only managers can reschedule.'); return; }
+    // await: confirmManager returns a Promise, and `!promise` is always false.
+    if(api && api.confirmManager && !(await api.confirmManager('reschedule this job'))) return;
+
+    const runs = order.ProductionRuns||[];
+    const run = runId ? runs.find(x=>x && x.Id===runId) : runs[0];
+    if(runId && !run){ alert('That run is no longer on this order — refresh the calendar and try again.'); return; }
+    const dur = this.durationOf(order, run);
+    const end = new Date(startDate.getTime()+dur*3600000);
+    const method = (order.ProductionMethods||[])[0];
+
+    try{
+      if(run && run.Id && String(run.Id).indexOf('r')!==0){
+        await api.patchProductionRun(run.Id, {
+          pressId, scheduledStart:startDate.toISOString(), scheduledEnd:end.toISOString(),
+        });
+      }else if(method && method.Id){
+        // quantity is REQUIRED by POST /api/production-runs -- it 400s with
+        // bad_quantity on a missing or non-positive-integer value. This used to
+        // be omitted, which meant creating a run always failed while moving an
+        // existing one worked, so the bug only bit on the queue-drag path.
+        const qty = this.qtyOf(order);
+        if(!qty){ alert('This order has no piece count yet, so a run can\'t be created. Add order items in Salesforce first.'); return; }
+        const dropRes = await api.createProductionRun({
+          printMethodId:method.Id, pressId,
+          scheduledStart:startDate.toISOString(), scheduledEnd:end.toISOString(),
+          quantity:qty,
+        });
+        /* B6. This path already reloads below, so only the notice is needed. */
+        if(api.noteRunRewind) api.noteRunRewind(dropRes);
+      }else{
+        alert('This order has no decoration to attach a run to.');
+        return;
+      }
+      // Order.Print_Date__c is NOT written from here any more. The run
+      // endpoints roll it up server-side (functions/api/_print-date-rollup.js)
+      // so a run edited from index.html or pre-production.html moves the order's
+      // date too -- and so there is exactly one writer rather than a client and
+      // a server racing to set the same field.
+    }catch(e){
+      console.error('drop failed', e);
+      // errText() first: it shows the server's own sentence (e.g. the S2
+      // "Artwork is not approved on order ..." refusal) instead of "POST ... -> 409".
+      const said=(api&&api.errText)?api.errText(e):'';
+      alert('Could not save that move — '+(said || (e && e.message ? e.message : 'unknown error')));
+    }
+    this.endDrag();
+    this.load();
+  }
+  /** Positive integer piece count, or null. Server-side roll-up of OrderItem
+   *  quantities (calendar/index.js). Required on every run create. */
+  qtyOf(order){
+    const q = Number(order && order.TotalQuantity);
+    return Number.isFinite(q) && q > 0 ? Math.round(q) : null;
+  }
+  /* 10-13: `run` = the run being moved, when there is one. This used to read
+     runs[0] always, so dragging an order's SECOND run gave it the FIRST run's
+     length (a 1 h back print could land as a 3 h block). With no run (a queue
+     card) it still uses the first run, then the order's hours split per run. */
+  durationOf(order, run){
+    const runs=order.ProductionRuns||[];
+    const r=run||runs[0];
+    if(r && r.Scheduled_Start__c && r.Scheduled_End__c){
+      const h=(Date.parse(r.Scheduled_End__c)-Date.parse(r.Scheduled_Start__c))/3600000;
+      if(Number.isFinite(h)&&h>0) return Math.min(HOURS,Math.max(0.25,h));
+    }
+    const total=Number(order.Duration__c);
+    const n=Math.max(1,runs.length||1);
+    const h=Number.isFinite(total)&&total>0 ? total/n : 2;
+    return Math.min(HOURS,Math.max(0.25,h));
+  }
+
+  /* ── handlers ──────────────────────────────────────────────────────── */
+  onSearch(e){ this.setState({q:e.target.value}); }
+  onRefresh(){ this.load(); }
+  onOpenNav(){ this.setState({navOpen:true}); }
+  onCloseNav(){ this.setState({navOpen:false}); }
+  /* Step by whatever the view shows, so Next never skips days or repeats
+     them: 1 for Day, 3 for the rolling 3-day outlook, 7 for Mon-Sat. */
+  viewStep(){ const v=this.state.view; return v==='day'?1:v==='3day'?3:7; }
+  onPrev(){ this.setState({anchor:this.state.anchor-this.viewStep()},()=>this.load()); }
+  onNext(){ this.setState({anchor:this.state.anchor+this.viewStep()},()=>this.load()); }
+  onToday(){ this.setState({anchor:0},()=>this.load()); }
+  // Opening or closing ALWAYS clears the run form. Without this, half-typed
+  // edits for one order would still be sitting in runEdits when the next one
+  // opens, and a Save would write them to the wrong run.
+  openOrder(id){
+    /* AU-14 (10-13): proposalUsedId is per ORDER. Left over from order A, the
+       next run created on order B marked A's suggestion Accepted and linked
+       it to B's run. */
+    this.setState({openId:id, runEdits:{}, runErr:'', runMsg:'', runBusy:null, newRunOpen:false, proposalUsedId:null});
+    if (id) this.loadSizes(id);
+    if (id) this.loadFramesFor([id]);
+  }
+  /* D41 Phase 4 (2026-10-23): the screens each order has now, for the chip on its cards.
+     On the calendar the chip lives in the order drawer (the run blocks have no room), so this
+     is called with the one order when its drawer opens. */
+  loadFramesFor(orderIds){
+    const api=this._api||window.CAApi;
+    const ids=[...new Set((orderIds||[]).filter(Boolean))];
+    if(!ids.length || !api || !api.getFramesByOrders) return;
+    const key=ids.slice().sort().join(','), now=Date.now();
+    if(this._framesKey===key && this._framesAt && now-this._framesAt<30000) return;
+    this._framesKey=key; this._framesAt=now;
+    api.getFramesByOrders(ids).then(m=>this.setState({ framesByOrder:m||{} })).catch(()=>{});
+  }
+  /* One request, only for an order somebody actually opened, and only the
+     first time. Failure is reported in the drawer rather than swallowed:
+     an empty garment panel and a panel that could not load look identical
+     otherwise, and "this order has no line items" is a different fact
+     from "we could not reach Salesforce". */
+  loadSizes(orderId){
+    const api = this._api || window.CAApi;
+    if (!api || !api.getOrderSizes) return;
+    if (this.state.sizes[orderId] || this.state.sizesBusy === orderId) return;
+    this.setState({ sizesBusy: orderId });
+    api.getOrderSizes(orderId).then(rows => {
+      const next = Object.assign({}, this.state.sizes); next[orderId] = rows || [];
+      const errs = Object.assign({}, this.state.sizesErr); delete errs[orderId];
+      this.setState({ sizes: next, sizesErr: errs, sizesBusy: this.state.sizesBusy === orderId ? null : this.state.sizesBusy });
+    }).catch(() => {
+      const errs = Object.assign({}, this.state.sizesErr); errs[orderId] = true;
+      this.setState({ sizesErr: errs, sizesBusy: this.state.sizesBusy === orderId ? null : this.state.sizesBusy });
+    });
+  }
+  onCloseDrawer(){ this.openOrder(null); }
+  onOpenSfEnv(){ this.setState({sfEnvOpen:true,sfEnvMsg:'',sfEnvErr:''}); this.loadEnv(); }
+  onCloseSfEnv(){ this.setState({sfEnvOpen:false}); }
+  onSfEnvPin(e){ this.setState({sfEnvPin:e.target.value}); }
+  async onSubmitSfEnv(){
+    const api=this._api; const pick=this.state.sfEnvPick;
+    if(!pick){ this.setState({sfEnvErr:'Pick an environment first.',sfEnvMsg:''}); return; }
+    this.setState({sfEnvSubmitting:true, sfEnvErr:'', sfEnvMsg:''});
+    try{
+      await api.setSfEnv(pick, this.state.sfEnvPin);
+      this.setState({sfEnvSubmitting:false, sfEnvMsg:'Switched — every tablet now talks to '+pick+'.', sfEnvPin:''});
+      this.loadEnv(); this.load();
+    }catch(e){
+      const s=e&&e.status;
+      this.setState({sfEnvSubmitting:false, sfEnvErr:
+        s===401?'Wrong PIN.':s===409?'That environment is not configured yet.':
+        s===500?'Switch PIN is not configured on the server.':
+        s===502?'Could not log in to that org — nothing was changed. Check its login details in Cloudflare.':'Could not switch.'});
+    }
+  }
+  onSwitchUser(){ const api=this._api; if(api&&api.clearIdentity) api.clearIdentity(); this.setState({nameOk:false,gatePin:'',gateErr:'',navOpen:false}); }
+  onLogout(){ const api=this._api; if(api&&api.logout) api.logout(); window.location.href='login.html'; }
+  async submitGate(pin){
+    const api=this._api;
+    this.setState({gateSubmitting:true, gateErr:''});
+    try{
+      const res=await api.workerLogin(pin);
+      api.setIdentity(res.name,res.role);
+      this.setState({nameOk:true,gatePin:'',gateErr:'',gateSubmitting:false});
+    }catch(e){
+      const s=e&&e.status;
+      this.setState({gateSubmitting:false, gatePin:'', gateShake:true,
+        gateErr:s===401?'Incorrect PIN — try again':s===500?'PIN login isn\'t set up yet — ask a manager':'Could not sign in'});
+      setTimeout(()=>this.setState({gateShake:false}), 500);
+    }
+  }
+
+  /* ── manual run editing ────────────────────────────────────────────────
+     Dragging is the fast path; this is the exact one. It mirrors index.html's
+     Production Runs section rather than inventing a second vocabulary for the
+     same job: the same "HH:MM" <select> off CAApi.TIME_OPTIONS, the same
+     buildRunDateTime/splitDT pair, the same ifUnmodifiedSince -> 409 handling.
+
+     One simplification: index.html has to go fetch its runs (getProductionRuns)
+     because its cards are per-method. /api/calendar already returns every run
+     with its LastModifiedDate, so this edits what is already on screen and the
+     round trip disappears.
+
+     Auto_Scheduling_Status__c is NOT set here. Both endpoints pin the run
+     themselves on any schedule write -- which matters more than it looks,
+     because the org's ProductionRunTrigger silently reschedules anything that
+     is not pinned. A manual edit that did not opt out would be overwritten by
+     the auto-scheduler seconds later.
+
+     CHANGED 2026-08-21: they stamp 'Confirmed'. Between 2026-08-18 and now
+     they stamped 'Planned' and publishing was a separate Confirm button; that
+     button is gone, so a schedule write that landed on Planned would strand the
+     run off the calendar with no way back. Dragging a job to a slot is a person
+     deciding it happens there, which is the same thing publishing means. A run
+     already Confirmed stays Confirmed, so dragging a published job moves its
+     calendar entry rather than deleting it. */
+  splitDT(iso){
+    if(!iso) return {date:'', time:''};
+    const d=new Date(iso); if(isNaN(d.getTime())) return {date:'', time:''};
+    const pad=n=>String(n).padStart(2,'0');
+    return {date:d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()), time:pad(d.getHours())+':'+pad(d.getMinutes())};
+  }
+  buildRunDateTime(dateStr,timeStr){
+    if(!dateStr || !timeStr) return null;
+    const d=new Date(dateStr+'T'+timeStr+':00');
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  /** The live form for one run key ('new' for the create form). Falls back to
+   *  values derived from the record, so render never has to write state. */
+  runForm(key, seed){
+    return this.state.runEdits[key] || seed;
+  }
+  setRunField(key, patch){
+    this.setState(st=>{
+      const base = st.runEdits[key] || (this._runSeeds && this._runSeeds[key]) || {};
+      return {runEdits:Object.assign({}, st.runEdits, {[key]:Object.assign({}, base, patch)}), runErr:'', runMsg:''};
+    });
+  }
+  runFail(msg){ this.setState({runErr:msg, runMsg:'', runBusy:null}); }
+
+  /* ── the Account Manager's suggestions ──────────────────────────────────
+     These are Proposed_Run__c rows the AM filled in when the order closed.
+     They hold no press time and cannot reach the calendar; they exist so the
+     shop manager -- who now owns the scheduling decision -- can see what was
+     promised to the customer without leaving the board.
+
+     "Use" answers the suggestion and fills the Create Run form in. It books
+     nothing by itself -- the run does not exist until the manager creates it.
+     Creating it now also publishes it (2026-08-21), so the two remaining steps
+     are "consider the AM's date" and "commit to it". What "Use" settles is only
+     the first. */
+  /* The AM suggestions still awaiting an answer from the shop.
+
+     Filtered twice on purpose. The server already sends only Proposed rows,
+     which is what makes a decision stick across refreshes and across everyone
+     else's screens; hiddenProposalIds is the same filter applied a beat
+     earlier, so the panel goes at the click instead of at the next load. */
+  openProposals(list){
+    const hidden=this.state.hiddenProposalIds||[];
+    return (list||[]).filter(p=>p && hidden.indexOf(p.id)===-1);
+  }
+
+  /* Take one of the AM's suggestions: fill the Create Run form in.
+
+     It is NOT marked Accepted here (changed 2026-09-29). saveRun() marks it
+     Accepted, with the Created Run link, once the run actually exists -- a
+     proposal marked Accepted before its run saved could end up Accepted with
+     no run behind it and gone from every board. Until then it is only hidden
+     on this screen; a reload brings it back. */
+  async useProposal(p){
+    const api=this._api;
+    if(!p) return;
+    if(!this.canEdit()){ this.runFail('Only managers and admins can schedule runs.'); return; }
+    const patch={};
+    if(p.proposedStart){
+      const ss=this.splitDT(p.proposedStart);
+      patch.startDate=ss.date; patch.startTime=ss.time;
+      const hrs=Number(p.proposedHours);
+      // Only derive an end when the AM actually gave hours. Inventing a
+      // duration would put a confident-looking wrong time in front of someone
+      // about to commit press time.
+      if(Number.isFinite(hrs) && hrs>0){
+        const e=this.splitDT(new Date(Date.parse(p.proposedStart)+hrs*3600000).toISOString());
+        patch.endDate=e.date; patch.endTime=e.time;
+      }
+    }
+    // Never overwrite a real piece count with a blank.
+    if(p.quantity!=null && Number(p.quantity)>0) patch.qty=String(p.quantity);
+    const carried=[], skipped=[];
+    if(patch.startDate) carried.push('time');
+    if(patch.qty) carried.push('quantity');
+
+    /* ── the decoration, and it has to happen BEFORE the location guard ──
+       The new-run form's decoration select defaults to the order's FIRST
+       decoration, and nothing here used to change it -- so a Heat Press
+       proposal on a Screen Print + Heat Press order booked press time against
+       Screen Print with every other field correctly filled in. A wrong run
+       that looks right is the worst shape this form can produce.
+
+       Order of operations is load-bearing: the print-location guard below
+       reads the decoration to decide which placements are allowed, so
+       resolving the decoration second would validate the AM's location
+       against whichever decoration happened to be first. */
+    const order=((this.state.data&&this.state.data.records)||[]).find(o=>o&&o.Id===this.state.openId);
+    const methods=((order&&order.ProductionMethods)||[]).filter(m=>m&&m.Id);
+    const pick=(api&&api.matchProposalMethod)
+      ? api.matchProposalMethod(methods, p.machineGroup, p.printLocation)
+      : {methodId:null, reason:'not-proposed'};
+    if(pick.methodId){
+      patch.methodId=pick.methodId;
+      carried.push('decoration');
+    } else if(pick.reason==='no-such-decoration'){
+      skipped.push('This order has no '+pick.type+' decoration, so the decoration was left as it was \u2014 check it before creating the run.');
+    } else if(pick.reason==='ambiguous'){
+      skipped.push('This order has '+pick.count+' '+pick.type+' decorations and the suggestion does not say which, so the decoration was left as it was.');
+    }
+
+    /* Carry the CAM's print location, but only if the decoration this run will
+       attach to actually offers it. The CAM proposes before any
+       Production_Method__c exists and so picks from all thirteen -- prefilling
+       a value the picker can't display would leave a blank select that
+       silently submits nothing. Evaluated against the decoration resolved
+       immediately above when there is one, falling back to whatever the form
+       is currently showing. */
+    const f=this.runForm('new', (this._runSeeds&&this._runSeeds['new'])||{});
+    const mId=patch.methodId||(f&&f.methodId)||((methods[0]||{}).Id)||null;
+    const chosen=methods.find(x=>x&&x.Id===mId)||null;
+    const allowed=(api&&api.locationsForMethod)?api.locationsForMethod(chosen&&chosen.Placements):[];
+    if(p.printLocation){
+      if(allowed.indexOf(p.printLocation)!==-1){ patch.printLocation=p.printLocation; carried.push('print location'); }
+      else skipped.push('Print location '+p.printLocation+" isn't offered by this decoration, so it was left blank.");
+    }
+    /* Switching the decoration can strand a location the form already held:
+       the seed defaults it from the FIRST decoration's placements, and the one
+       the proposal picked may not offer that value. Same wrong-decoration bug
+       as above, one field over, so it is cleared rather than left to submit. */
+    if(patch.methodId && patch.printLocation===undefined && f && f.printLocation
+       && allowed.indexOf(f.printLocation)===-1){
+      patch.printLocation='';
+    }
+    // "Also prints on" from the proposal, kept only where this decoration
+    // offers it as an extra; anything else is named in the skipped list.
+    { const want=(api&&api.splitAlso)?api.splitAlso(p.alsoPrintsOn):[];
+      if(want.length){
+        const main=patch.printLocation!==undefined?patch.printLocation:((f&&f.printLocation)||'');
+        const ok=(api&&api.alsoChips)?api.alsoChips(chosen&&chosen.Placements, main, [], ()=>{}).map(c=>c.label):[];
+        const keep=want.filter(v=>ok.indexOf(v)!==-1), lost=want.filter(v=>ok.indexOf(v)===-1);
+        patch.alsoPrintsOn=keep;
+        if(keep.length) carried.push('also prints on');
+        if(lost.length) skipped.push('Also prints on '+lost.join(', ')+" isn't offered by this decoration, so it was left off.");
+      } else if(patch.methodId){ patch.alsoPrintsOn=[]; } }
+    /* Carry the AM's press the same way, and under the same rule. The press
+       select is built from this.presses() -- the org's real Account rows of
+       Type='Press' -- so a proposal naming a press that has since been
+       deleted, or any proposal at all in an org with no presses configured,
+       must leave the select on "Pick a press..." rather than selecting an
+       option that does not exist. A <select> handed a value with no matching
+       <option> renders BLANK while reading as filled in, and POST
+       /api/production-runs requires pressId, so that blank is a form that
+       looks ready and 400s on submit. Prefill only what the picker can show;
+       otherwise say nothing and let the manager choose. */
+    if(p.pressId){
+      if(this.presses().some(pr=>pr && pr.Id===p.pressId)){ patch.pressId=p.pressId; carried.push('press'); }
+      else skipped.push('Press '+(p.pressName||'the one suggested')+' is not set up in this org, so it was left blank.');
+    }
+    this.setRunField('new', patch);
+    // Expand the form as part of filling it in. "Use this" silently writing
+    // into a panel the manager cannot see would look like the button did
+    // nothing at all.
+    this.setState(st=>({proposalUsedId:p.id, runErr:'', newRunOpen:true,
+      hiddenProposalIds: st.hiddenProposalIds.concat([p.id]),
+      runMsg:(api&&api.proposalFillMessage)
+        ? api.proposalFillMessage(p.name, carried, skipped, p.notes)
+        : ('Filled in from '+p.name+'.')}));
+
+    /* NOT marked Accepted here any more (2026-09-29). It used to be, the moment
+       the form was filled -- so a run that then failed to save (artwork gate,
+       press, a manager walking away) left the proposal Accepted with no run
+       behind it, gone from both boards. saveRun() writes Accepted together
+       with the Created Run link once the run exists; until then the proposal
+       is only hidden on this screen, and a reload brings it back. */
+  }
+
+  async rejectProposal(p){
+    const api=this._api;
+    if(!p) return;
+    if(this.state.conn!=='live'){ this.runFail('Not connected to Salesforce — nothing was saved.'); return; }
+    if(!this.canEdit()){ this.runFail('Only managers and admins can decide on suggestions.'); return; }
+    // Rejected rather than deleted on purpose: "the shop was asked for this
+    // date and said no" is the most useful thing on the record, and it
+    // disappears with the row.
+    if(!window.confirm('Turn down '+p.name+'? It stays on the order as rejected so the account manager can see the answer.')) return;
+    this.setState({runBusy:'prop-'+p.id, runErr:'', runMsg:''});
+    try{
+      await api.patchProposedRun(p.id, {status:'Rejected'});
+      // Hidden as well as reloaded, for the same reason as "Use this": a
+      // decided suggestion should leave the screen when it is decided.
+      this.setState(st=>({runBusy:null,
+        hiddenProposalIds: st.hiddenProposalIds.concat([p.id]),
+        proposalUsedId: st.proposalUsedId===p.id ? null : st.proposalUsedId}));
+      this.load();
+    }catch(e){
+      console.error('reject failed', e);
+      this.setState({runBusy:null});
+      this.runFail('Could not turn that suggestion down — '+((e&&e.message)?e.message:'unknown error'));
+    }
+  }
+
+  async saveRun(order, run, key){
+    const api=this._api, st=this.state;
+    if(st.runBusy || this._runPin) return;
+    if(st.conn!=='live'){ this.runFail('Not connected to Salesforce — nothing was saved.'); return; }
+    if(!this.canEdit()){ this.runFail('Only managers and admins can change a run.'); return; }
+    const f=st.runEdits[key] || (this._runSeeds && this._runSeeds[key]);
+    if(!f){ this.runFail('Nothing to save.'); return; }
+    /* AU-27 (10-13): the button is busy WHILE the PIN prompt is up. It used to
+       stay live through that round trip, so a second tap queued a second
+       prompt and, once both were answered, a second run. The instance flag
+       covers the tap that lands before setState re-renders. */
+    this._runPin=true;
+    this.setState({runBusy:key, runErr:'', runMsg:''});
+    let pinOk=true;
+    try{
+      // await: confirmManager returns a Promise, and `!promise` is always false.
+      if(api && api.confirmManager) pinOk=!!(await api.confirmManager(run?'Changing this production run':'Creating a production run'));
+    }finally{ this._runPin=false; }
+    if(!pinOk){ this.setState({runBusy:null}); return; }
+
+    if(!f.pressId){ this.runFail('Pick a press.'); return; }
+    const start=this.buildRunDateTime(f.startDate,f.startTime);
+    if(!start){ this.runFail('Set the start date and time.'); return; }
+    const end=this.buildRunDateTime(f.endDate,f.endTime);
+    if(!end){ this.runFail('Set the end date and time.'); return; }
+    if(Date.parse(end) <= Date.parse(start)){ this.runFail('The end has to be after the start.'); return; }
+    /* 2026-10-23: never two runs on the same press at the same time (the server refuses it too). */
+    { const pcv=(api&&api.pressCheck)?api.pressCheck(f.pressId,start,end,run?run.Id:null,null,null):null;
+      if(pcv && pcv.hasClash){ this.runFail(pcv.clashText); return; } }
+    const qty=Number(f.qty);
+    if(!f.qty || !Number.isFinite(qty) || qty<=0 || Math.floor(qty)!==qty){
+      this.runFail('Enter a whole piece count above zero.'); return;
+    }
+
+    const locationOn=!!(api&&api.locationAvailable&&api.locationAvailable());
+    const alsoOn=!!(api&&api.alsoAvailable&&api.alsoAvailable()&&api.splitAlso);
+    this.setState({runBusy:key, runErr:'', runMsg:''});
+    try{
+      if(run){
+        const body={pressId:f.pressId, scheduledStart:start, scheduledEnd:end, quantity:qty};
+        // '' is meaningful on PATCH: it clears a location set by mistake.
+        if(locationOn) body.printLocation=f.printLocation||'';
+        // [] clears the extras on PATCH.
+        if(alsoOn) body.alsoPrintsOn=api.splitAlso(f.alsoPrintsOn).filter(v=>v!==f.printLocation);
+        await api.patchProductionRun(run.Id, body, f.loadedAt);
+      }else{
+        const methodId=f.methodId || (((order.ProductionMethods||[])[0]||{}).Id);
+        if(!methodId){ this.runFail('This order has no decoration to attach a run to.'); return; }
+        const createBody={printMethodId:methodId, pressId:f.pressId,
+          scheduledStart:start, scheduledEnd:end, quantity:qty};
+        if(locationOn && f.printLocation) createBody.printLocation=f.printLocation;
+        { const al=alsoOn?api.splitAlso(f.alsoPrintsOn).filter(v=>v!==f.printLocation):[]; if(al.length) createBody.alsoPrintsOn=al; }
+        const res=await api.createProductionRun(createBody);
+        /* B6: same notice as the other boards -- see noteRunRewind in ca-api.js. */
+        if(api.noteRunRewind) api.noteRunRewind(res);
+
+        /* Close the loop on the AM's suggestion: mark it Accepted and point it
+           at the run that came out of it. Without the link "Accepted" is just
+           an assertion; with it, anyone can later ask whether the date the AM
+           promised is the date the shop actually booked.
+
+           After the run, and swallowed on failure. The run is the thing that
+           matters -- a manager should never see "create failed" because a
+           bookkeeping write on a suggestion didn't land. Worst case the
+           proposal stays Proposed and someone tidies it later. */
+        const usedId=this.state.proposalUsedId;
+        if(usedId && api.patchProposedRun){
+          try{ await api.patchProposedRun(usedId, {status:'Accepted', createdRunId:(res&&res.id)||undefined}); }
+          catch(e){ console.error('proposal accept failed', usedId, e); }
+        }
+      }
+      // Collapse the form once the run exists -- it is now a real row in the
+      // list above, and leaving a filled-in form open under it invites a
+      // duplicate. Editing an existing run leaves the form as it was.
+      this.setState({runBusy:null, runMsg:run?'Run updated.':'Run created.', runEdits:{}, proposalUsedId:null,
+        newRunOpen: run ? this.state.newRunOpen : false});
+      this.load();
+    }catch(e){
+      // 409 == someone else saved this run after we loaded it. Never silently
+      // overwrite them; reload and make the manager re-apply deliberately.
+      // ONLY error:'conflict' is an edit collision -- and only an existing run
+      // can have one. Every other failure keeps the form and shows the
+      // server's own reason (errText), not "POST ... -> 400".
+      if(run && e && e.status===409 && e.data && e.data.error==='conflict'){
+        this.setState({runBusy:null, runErr:'', runEdits:{}});
+        window.alert('Someone else just changed this run, so nothing was saved. Reloading the latest version — review it and re-apply your change.');
+        this.load();
+      }else{
+        console.error('saveRun failed', e);
+        const said=(api&&api.errText)?api.errText(e):'';
+        this.runFail('Could not save — '+(said || ((e && e.message) ? e.message : 'unknown error')));
+      }
+    }
+  }
+
+  async removeRun(order, run){
+    const api=this._api;
+    if(this.state.conn!=='live'){ this.runFail('Not connected to Salesforce — nothing was saved.'); return; }
+    if(!this.canEdit()){ this.runFail('Only managers and admins can remove a run.'); return; }
+    // await: confirmManager returns a Promise, and `!promise` is always false.
+    if(api && api.confirmManager && !(await api.confirmManager('Removing a production run'))) return;
+    if(!window.confirm('Remove this production run? This can’t be undone.')) return;
+    this.setState({runBusy:run.Id, runErr:'', runMsg:''});
+    try{
+      await api.deleteProductionRun(run.Id);
+      this.setState({runBusy:null, runMsg:'Run removed.', runEdits:{}});
+      this.load();
+    }catch(e){
+      console.error('removeRun failed', e);
+      this.runFail('Could not remove that run — try again.');
+    }
+  }
+
+  /* ── render ────────────────────────────────────────────────────────── */
+  renderVals(){
+    const api=this._api, st=this.state, t=(v)=>this.t(v);
+    const canEdit=this.canEdit();
+    const rows=this.visible();
+    const presses=this.presses();
+    const {start,span}=this.windowDays();
+
+    const scoreColor = s => s>=8?CRIT : s>=6?AMBER : INK;
+    const prepColor  = k => k==='good'?GREEN : k==='warn'?AMBER : CRIT;
+    const prepIcon   = k => k==='good'?'ti-circle-check':'ti-alert-triangle';
+    const pct = n => (Math.max(0,n)/10*100).toFixed(1)+'%';
+    const contribs = p => { const c=(p&&p.contributions)||{}; return [c.urgency||0, c.amRating||0, c.prepRisk||0, c.firm||0]; };
+    const barsOf = p => contribs(p).map((v,i)=>({w:pct(v), c:RAMP[i]})).filter(b=>parseFloat(b.w)>0.4);
+    const hhmm = iso => { const d=new Date(iso); return d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}).replace(':00',''); };
+    /* Day + time, for anything that may fall outside the window on screen --
+       an AM suggestion can name a date the board isn't showing, and "2:30 PM"
+       with no day attached would read as today. */
+    const dayHM = iso => { const d=new Date(iso); return isNaN(d.getTime()) ? '' :
+      d.toLocaleString([], {weekday:'short', month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit'}); };
+    const pressName = id => t((presses.filter(x=>x.Id===id)[0]||{}).Name) || 'Unassigned';
+
+    /* ── the five calendars ───────────────────────────────────────────────
+       Rows are HOURS OF THE DAY now, not presses. The press moved inside the
+       run block, where it belongs: a manager asks "what is running at 9am"
+       far more often than "what is Press 2 doing all week", and the old
+       press-lane grid could not answer the first question at all.
+
+       Which press each calendar covers is decided SERVER-SIDE (_priority.js's
+       PRESS_GROUPS, resolved in calendar/index.js and shipped as press.group).
+       The browser deliberately has no copy of the matching rules -- two copies
+       would drift the first time a press is renamed. */
+    const serverGroups = this.pressGroups();
+    const ungrouped = (st.data && st.data.pressesUngrouped) || 0;
+    const groupOfPress = {};
+    presses.forEach(pr=>{ if(pr.group) groupOfPress[pr.Id]=pr.group; });
+
+    const runGroup = r => groupOfPress[r.Press__c] || null;
+    const activeGroup = st.group || 'all';
+    const groupDef = serverGroups.filter(g=>g.key===activeGroup)[0] || null;
+
+    /** Does this order belong on the active calendar? Scheduled work is judged
+     *  by the press its run is on; unscheduled work has no press yet, so it is
+     *  judged by method type -- which is why a Screen Print job with no run
+     *  shows in BOTH the Press 1 and Press 2 queues. Either could take it. */
+    const orderInGroup = o => {
+      if(activeGroup==='all') return true;
+      const runs=(o.ProductionRuns||[]).filter(r=>r.Press__c);
+      if(runs.length) return runs.some(r=>runGroup(r)===activeGroup);
+      if(!groupDef) return true;
+      const types=(o.ProductionMethods||[]).map(m=>String((m&&m.Type__c)||'').trim());
+      if(!types.length) return true;
+      return types.some(t=>(groupDef.methodTypes||[]).indexOf(t)>-1);
+    };
+    const scoped = rows.filter(orderInGroup);
+
+    /* Tab counts are of ORDERS on that calendar in this window, which is the
+       number a manager is actually asking for ("how much is on Press 1").
+       Finished work is excluded for the same reason it is excluded from the
+       KPI tiles: the question is how much is still to do, and history piling
+       into the number as you scroll back would make the tabs useless. */
+    const countFor = key => {
+      const save=activeGroup;
+      return rows.filter(o=>!o.Done).filter(o=>{
+        if(key==='all') return true;
+        const g=serverGroups.filter(x=>x.key===key)[0];
+        const runs=(o.ProductionRuns||[]).filter(r=>r.Press__c);
+        if(runs.length) return runs.some(r=>runGroup(r)===key);
+        if(!g) return false;
+        const types=(o.ProductionMethods||[]).map(m=>String((m&&m.Type__c)||'').trim());
+        return types.length ? types.some(t=>(g.methodTypes||[]).indexOf(t)>-1) : false;
+      }).length + (save&&0);
+    };
+    const GROUP_ICON = {all:'ti-layout-grid', press1:'ti-printer', press2:'ti-printer',
+                        embroidery:'ti-needle-thread', heat:'ti-flame'};
+    /* Method identity on the calendar TABS, and deliberately nowhere else on
+       this page. The grid blocks already carry four colour axes -- outstanding
+       prep, scheduling state (Confirmed vs Planned), priority score, and grey
+       for finished work -- and a fifth on a 30px block would make all five
+       unreadable. The tab strip is where the method belongs anyway: every
+       calendar except Master IS exactly one method, so the icon takes that
+       method's colour (tokens.css --method-*, same values as METHOD_META) and
+       the tab's own background/border/text keep saying which one is selected.
+       Keyed on the group key, same as GROUP_ICON above. Master mixes methods
+       and keeps the neutral selected/unselected treatment. */
+    const GROUP_METHOD = {press1:'var(--method-sp)', press2:'var(--method-sp)',
+                          embroidery:'var(--method-em)', heat:'var(--method-hp)'};
+    const calendars = [{key:'all', label:'Master'}].concat(serverGroups.map(g=>({key:g.key,label:g.label}))).map(c=>{
+      const on = activeGroup===c.key;
+      return {
+        label:c.label, count:countFor(c.key), icon:GROUP_ICON[c.key]||'ti-printer',
+        bg: on?'#241110':'transparent', border: on?'#7A241C':'#2a2a2f',
+        textColor: on?'#E8A89F':MUT, dotColor: GROUP_METHOD[c.key] || (on?'#E8A89F':FAINT),
+        countColor: on?INK:DIM,
+        onPick:()=>{ if(activeGroup!==c.key) this.setState({group:c.key}); },
+      };
+    });
+
+    /* queue */
+    /* Finished orders are drawn on the grid but are NOT work. They stay out of
+       the queue, the tab counts and the KPI tiles, so "5 jobs this week" keeps
+       meaning five jobs still to do rather than quietly inflating with history
+       every time someone scrolls back. */
+    const live = scoped.filter(o=>!o.Done);
+    const queue = live.filter(o=>o.needsScheduling).map(o=>{
+      const p=o.priority||{score:1}, sug=o.suggestion;
+      const qProps=this.openProposals(o.Proposals);
+      return {
+        customer:t(o.Account&&o.Account.Name)||'—',
+        sub:[t(o.Customer_Order_Name__c), t(o.GOA_Order_Number__c)].filter(Boolean).join(' · ')||'—',
+        method:t(((o.ProductionMethods||[])[0]||{}).Type__c)||'—',
+        score:(p.score||1).toFixed(1), scoreColor:scoreColor(p.score||1),
+        prepLabel:t(o.prep&&o.prep.label)||'—', prepColor:prepColor(o.prep&&o.prep.key),
+        prepIcon:prepIcon(o.prep&&o.prep.key), bars:barsOf(p),
+        suggestion: sug && sug.start ? ('Suggested: '+t(sug.pressName||'a press')+' · '+hhmm(sug.start)) : 'No free slot found',
+        // The AM's own suggestion, surfaced on the card. Without this the queue
+        // gives no hint that anyone asked for a particular date, and the
+        // manager would only find out by opening the drawer.
+        amHint: qProps.length
+          ? ('AM: '+t((qProps[0]||{}).machineGroup||'run')
+             +((qProps[0]||{}).proposedStart ? ' · '+dayHM(qProps[0].proposedStart) : '')
+             +(qProps.length>1 ? '  +'+(qProps.length-1)+' more' : ''))
+          : '',
+        hasAmHint: qProps.length>0,
+        canDrag: canEdit ? 'true' : 'false',
+        cursor: canEdit ? 'grab' : 'pointer',
+        onDragStart:()=>{ if(canEdit) this.setState({dragging:{orderId:o.Id}}); },
+        onDragEnd:()=>this.endDrag(),
+        onOpen:()=>this.openOrder(o.Id),
+      };
+    });
+
+    /* ── time grid: hours down, days across ─────────────────────────────── */
+    const ROW_H = 62;                       // px per hour
+    const trackH = HOURS*ROW_H;
+    const dayCount = st.view==='day' ? 1 : span;
+    /* Column width by view, defined once. Three days get materially more room
+       than six do -- that extra width is the whole reason to pick this view,
+       since it is where a block finally has space for the customer name and
+       the times instead of just an order number. */
+    const COL_PX = st.view==='day' ? 340 : st.view==='3day' ? 260 : 158;
+    const dayOfCol = i => { const d=new Date(start); d.setDate(d.getDate()+i); return d; };
+    const today = new Date(); today.setHours(0,0,0,0);
+    /* "Now" line. st.now already ticks once a second to drive the header clock,
+       so this rides that render and needs no timer of its own -- at 62px an hour
+       it steps a visible 1px per minute.
+
+       Only drawn on the column that IS today, and only between 7 and 16. Outside
+       shop hours it is hidden rather than clamped to an edge: a line pinned to
+       the top of the grid at 5am reads as "it is 7am now", which is worse than
+       no line. Navigate to last week and nothing draws, which is correct. */
+    const nowH = st.now.getHours() + st.now.getMinutes()/60;
+    const nowInShop = nowH >= SHOP_START && nowH <= SHOP_END;
+    const nowTopPx = (nowH - SHOP_START) * ROW_H;
+
+    const hourLabels = Array.from({length:HOURS},(_,i)=>{
+      const h=SHOP_START+i;
+      return {label:((h%12)||12)+(h<12?' AM':' PM')};
+    });
+    const headers = Array.from({length:dayCount},(_,i)=>{
+      const d=dayOfCol(i);
+      const isToday = d.getTime()===today.getTime();
+      return {
+        label: d.toLocaleDateString([], {weekday:'short'}),
+        sub: d.toLocaleDateString([], {month:'short', day:'numeric'}),
+        bg: isToday?'#241110':'#101013',
+        border: isToday?'#7A241C':'#202024',
+        color: isToday?'#E8A89F':MUT,
+      };
+    });
+
+    /** Every run on the active calendar, flattened with its order. */
+    const placed=[];
+    scoped.forEach(o=>{
+      (o.ProductionRuns||[]).forEach(r=>{
+        if(!r.Scheduled_Start__c || !r.Press__c) return;
+        if(activeGroup!=='all' && runGroup(r)!==activeGroup) return;
+        placed.push({o,r});
+      });
+    });
+
+    const cols = Array.from({length:dayCount},(_,i)=>{
+      const d=dayOfCol(i);
+      const dayKey=d.toDateString();
+
+      const slots = Array.from({length:HOURS},(_,hIdx)=>{
+        const key=i+':'+hIdx;
+        const hour=SHOP_START+hIdx;
+        return {
+          top:(hIdx*ROW_H)+'px', height:ROW_H+'px',
+          title:'Drop here to schedule for '+((hour%12)||12)+(hour<12?' AM':' PM'),
+          overBg: st.overKey===key ? 'rgba(198,55,43,.16)' : 'transparent',
+          onDragOver:(e)=>{ if(!canEdit) return; e.preventDefault(); if(st.overKey!==key) this.setState({overKey:key}); },
+          onDragLeave:()=>{ if(st.overKey===key) this.setState({overKey:null}); },
+          onDrop:(e)=>{
+            if(!canEdit) return;
+            e.preventDefault();
+            const drag=st.dragging; if(!drag){ this.endDrag(); return; }
+            const order=rows.filter(x=>x.Id===drag.orderId)[0];
+            if(!order){ this.endDrag(); return; }
+            const when=new Date(d); when.setHours(hour,0,0,0);
+            /* pressForDrop() returns null after alerting the user -- no press
+               mapped to this calendar, or no press at all. The drag is over
+               either way, so end it rather than leaving it armed behind the
+               alert the worker just dismissed. */
+            const dragRun=drag.runId ? ((order.ProductionRuns||[]).find(x=>x && x.Id===drag.runId)||null) : null;
+            const pressId=this.pressForDrop(order, when, dragRun);
+            if(!pressId){ this.endDrag(); return; }
+            this.commitDrop(order, pressId, when, drag.runId||null);
+          },
+        };
+      });
+
+      /* Blocks for this day, positioned by time. Anything overlapping shares
+         the width side by side -- same as any day-view calendar, and the only
+         way a double-booked hour reads as double-booked. */
+      const items = placed
+        .filter(({r})=>new Date(r.Scheduled_Start__c).toDateString()===dayKey)
+        .map(({o,r})=>{
+          const s0=new Date(r.Scheduled_Start__c);
+          const e0=new Date(r.Scheduled_End__c||r.Scheduled_Start__c);
+          const startH=Math.max(SHOP_START, s0.getHours()+s0.getMinutes()/60);
+          const endH=Math.min(SHOP_END, Math.max(startH+0.25, e0.getHours()+e0.getMinutes()/60 + (e0.toDateString()!==dayKey?24:0)));
+          return {o, r, startH, endH};
+        })
+        .sort((a,b)=>a.startH-b.startH || b.endH-a.endH);
+
+      const laneEnd=[];
+      items.forEach(it=>{
+        let l=0; while(l<laneEnd.length && laneEnd[l] > it.startH+0.001) l++;
+        laneEnd[l]=it.endH; it.lane=l;
+      });
+      const laneCount=Math.max(1, laneEnd.length);
+
+      /* Overlapping runs are NEVER hidden behind a "+2 more" chip, however
+         narrow it gets. This is a board whose job is to stop a press being
+         double-booked; a run you cannot see is the same bug as a press that
+         reads free when it is busy. They get thinner instead, and the block
+         text drops detail as the lane narrows -- order number and score always
+         survive, then the press, then the customer and times. Full detail is a
+         hover away on every block, and the whole point of the four press tabs
+         is that you rarely read Master's overlap: on Press 1 the lane count is
+         almost always one and every block is full width. */
+      // Deliberately the MIN width, not the likely one. Columns are minmax(min,1fr)
+      // so they usually get more, and estimating high would clip text on the one
+      // layout where it is actually tight.
+      const colPx = COL_PX;
+      const lanePx = colPx/laneCount;
+
+      const blocks = items.map(it=>{
+        const {o,r}=it;
+        const p=o.priority||{score:1};
+        const sched=schedState(r);
+        /* Finished work stays on the board so "what did we run last Tuesday"
+           has an answer, but it must never compete visually with work that
+           still has to happen. Grey overrides the scheduling colours entirely:
+           once a job is off the press, whether it was Planned or Confirmed is
+           history, and colouring it as though the distinction still matters
+           would make the live week harder to read. */
+        const done=!!o.Done;
+        const h=Math.max(30,(it.endH-it.startH)*ROW_H-3);
+        const w=100/laneCount;
+        const pname=t(r.Press||pressName(r.Press__c));
+        /* B20: the ORDER's garment count on the block. qtyOf() reads
+           Order.TotalQuantity, which /api/calendar already rolled up from
+           OrderItem, so this costs no request and adds nothing to any SELECT.
+           null (unknown) renders NOTHING -- never "0 pcs", which would read as
+           a real, empty job.
+
+           Only at the `roomy` tier. These blocks are as short as 30px and as
+           narrow as 60px, and they already ration what they show across three
+           tiers on purpose (see showPress/showScore/roomy below); a fourth
+           line forced onto a cramped block would push out the order number,
+           which is the one thing that must always survive. The title tooltip
+           carries it at EVERY tier instead, so it is always reachable. */
+        const blockQty=this.qtyOf(o);
+        const qtyLabel=blockQty==null?'':blockQty+' pcs on this order';
+        return {
+          num:window.CAApi.orderNum(o),
+          customer:t(o.Account&&o.Account.Name)||'—',
+          hasQty: !!qtyLabel, qtyLabel,
+          press:pname, pressColor: done?FAINT:sched.accent,
+          time:hhmm(r.Scheduled_Start__c)+'–'+hhmm(r.Scheduled_End__c||r.Scheduled_Start__c),
+          title:[t(o.Account&&o.Account.Name), pname, hhmm(r.Scheduled_Start__c)+'–'+hhmm(r.Scheduled_End__c||r.Scheduled_Start__c), qtyLabel].filter(Boolean).join(' · '),
+          score:(p.score||1).toFixed(1), scoreColor: done?FAINT:scoreColor(p.score||1),
+          color: done?FAINT:prepColor(o.prep&&o.prep.key),
+          borderStyle: done?'solid':sched.border,
+          // .42 was too far -- against this background it read as a rendering
+          // glitch rather than as finished work. .58 still recedes behind every
+          // live block while staying legible enough to answer "what ran here".
+          opacity: done?'.58':sched.opacity,
+          // Three tiers by how much width this block actually got. The ORDER
+          // NUMBER survives every tier -- it is the thing a manager reads to
+          // find the job -- so at the narrowest tier the score steps aside and
+          // lets the number have the whole line rather than both being clipped.
+          // Outstanding prep, on the block itself. The prep BAR already colours
+          // the block by readiness, but a colour cannot say "three items" and
+          // cannot be acted on -- this is the number that makes someone open
+          // the drawer before Tuesday rather than on Tuesday.
+          prepOpen: (o.OpenPrepItems||[]).length,
+          hasPrepOpen: (o.OpenPrepItems||[]).length>0 && !done,
+          // D34: this run is booked after the day the order has to ship.
+          // Compared as shop-local calendar dates (en-CA formats YYYY-MM-DD).
+          lateShip: !done && !!o.Ship_By_formula__c && (function(v){ const d=new Date(v); return isNaN(d.getTime())?'':d.toLocaleDateString('en-CA'); })(r.Scheduled_Start__c) > String(o.Ship_By_formula__c).slice(0,10),
+          prepOpenLabel: (o.OpenPrepItems||[]).length+' prep',
+          roomy: h>=76 && lanePx>=104,     // + customer and times
+          showPress: lanePx>=60,           // press spelled out, not just its icon
+          showScore: lanePx>=60,
+          canDrag: canEdit?'true':'false',
+          cursor: canEdit?'grab':'pointer',
+          top:((it.startH-SHOP_START)*ROW_H+2)+'px', height:h+'px',
+          left:(it.lane*w)+'%', width:'calc('+w+'% - 4px)',
+          onDragStart:()=>{ if(canEdit) this.setState({dragging:{orderId:o.Id, runId:(r&&r.Id)||null}}); },
+          onDragEnd:()=>this.endDrag(),
+          onOpen:()=>this.openOrder(o.Id),
+        };
+      });
+
+      const isToday = d.getTime()===today.getTime();
+      return {
+        /* E4.5: "nothing scheduled" is a statement about the press, so it must
+           not appear before the week has loaded. Only claim a day is clear once
+           the board is actually live. */
+        slots, blocks, empty: st.conn==='live' && blocks.length===0,
+        showNow: isToday && nowInShop,
+        nowTop: nowTopPx+'px',
+        nowLabel: st.now.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}),
+      };
+    });
+
+    /* KPIs -- scoped to the active calendar, so switching to Press 2 answers
+       "how much is on Press 2" rather than repeating the whole shop's totals. */
+    const unsched=live.filter(o=>o.needsScheduling).length;
+    const risk=live.filter(o=>o.prep&&o.prep.key!=='good').length;
+    const top=live.slice().sort((a,b)=>((b.priority||{}).score||0)-((a.priority||{}).score||0))[0];
+    /* E4.5. These tiles read 0 and reassure -- "everything is placed", "every
+       counted run is accounted for", "everything has runway" -- on the FIRST
+       PAINT, before the window has been fetched. Three confident statements
+       about a shop nobody has asked about yet. While loading the value shows an
+       em dash (the treatment E5.9 settled on for a number this app cannot stand
+       behind) and the sub-line says nothing about the work. */
+    const kpiLoading = st.conn === 'loading';
+    const kv = (v) => kpiLoading ? '—' : v;
+    const ks = (busy, calm) => kpiLoading ? '' : (busy || calm);
+    const kpis=[
+      {label:'Needs Scheduling', value:kv(unsched), unit:unsched===1?'order':'orders', accent:kpiLoading?DIM:(unsched?AMBER:GREEN),
+       valueColor:kpiLoading?DIM:(unsched?AMBER:INK), sub:ks(unsched&&'no production run yet','everything is placed')},
+      // Sits next to "Needs Scheduling" on purpose: both are work that has to be
+      // placed on a press and isn't yet. The difference is that a shortfall is
+      // invisible everywhere else -- the order looks finished, because the run
+      // that was supposed to print those garments has been counted and closed.
+      // Counted shop-wide, not filtered to the date window: a shortfall on a job
+      // that printed last week is exactly the one you must not lose track of.
+      {label:'Not Printed', value:kv(st.shortfallTotal), unit:st.shortfallTotal===1?'garment':'garments',
+       accent:kpiLoading?DIM:(st.shortfallTotal?AMBER:GREEN), valueColor:kpiLoading?DIM:(st.shortfallTotal?AMBER:INK),
+       sub:ks(st.shortfallTotal&&'counted but never ran — needs a make-up run','every counted run is accounted for')},
+      {label:'Prep At Risk', value:kv(risk), unit:risk===1?'order':'orders', accent:kpiLoading?DIM:(risk?CRIT:GREEN),
+       valueColor:kpiLoading?DIM:(risk?CRIT:INK), sub:ks(risk&&'behind on pre-production','everything has runway')},
+      {label:'Highest Priority', value:kpiLoading?'—':(top?((top.priority||{}).score||1).toFixed(1):'—'), unit:'of 10', accent:kpiLoading?DIM:RED,
+       valueColor:kpiLoading?DIM:INK, sub:kpiLoading?'':(top?(t(top.Account&&top.Account.Name)||'—'):'nothing in this window')},
+      {label:'Orders In View', value:kv(live.length), unit:live.length===1?'order':'orders', accent:kpiLoading?DIM:PURPLE,
+       valueColor:kpiLoading?DIM:INK, sub:kpiLoading?'':(st.view==='day'?'printing this day':st.view==='3day'?'printing these three days':'printing this week')},
+    ];
+
+    /* drawer */
+    const open=rows.filter(o=>o.Id===st.openId)[0]; // NOT scoped: a drawer opened from one calendar stays open if the tab changes
+    const TIME_OPTIONS=(api&&api.TIME_OPTIONS)||[];
+    const pressOptions=presses.map(pr=>({id:pr.Id, name:t(pr.Name)}));
+    // Seeds live on the instance so the handlers can read the same defaults the
+    // form was rendered from, without renderVals writing state.
+    this._runSeeds={};
+
+    const d = open ? (()=>{
+      const p=open.priority||{score:1};
+      const orderQty=this.qtyOf(open);
+      /* Shared by every run row in this drawer AND the "Add A Run" form, so
+         an existing run and a brand-new one describe the same order the same
+         way. Returns '' when orderQty is null -- see CAApi.runQtyHint. */
+      const qtyHintFor=(q)=>{ const a=this._api||window.CAApi; return (a&&a.runQtyHint)?a.runQtyHint(q, orderQty):''; };
+      const dur=this.durationOf(open);
+      /* Print-location plumbing for this drawer. locationsFor() maps a
+         Production_Method__c Id to the placements that method actually has,
+         falling back to all thirteen when it lists none (see
+         CAApi.locationsForMethod). */
+      const _capi=this._api||window.CAApi;
+      const locationOn=!!(_capi&&_capi.locationAvailable&&_capi.locationAvailable());
+      const alsoOn=!!(_capi&&_capi.alsoAvailable&&_capi.alsoAvailable()&&_capi.alsoChips);
+      const placementsFor=(methodId)=>{ const m=(open.ProductionMethods||[]).find(x=>x&&x.Id===methodId); return m&&m.Placements; };
+      const locationsFor=(methodId)=>{
+        const m=(open.ProductionMethods||[]).find(x=>x&&x.Id===methodId);
+        return (_capi&&_capi.locationsForMethod)?_capi.locationsForMethod(m&&m.Placements):[];
+      };
+
+      const runs=(open.ProductionRuns||[]).map(r=>{
+        const key=r.Id;
+        const ss=this.splitDT(r.Scheduled_Start__c), se=this.splitDT(r.Scheduled_End__c);
+        const seed={pressId:r.Press__c||null, startDate:ss.date, startTime:ss.time,
+                    endDate:se.date, endTime:se.time,
+                    qty: r.Quantity_Planned_c__c!=null ? String(r.Quantity_Planned_c__c) : (orderQty?String(orderQty):''),
+                    // '' covers both "no location on this run" and "org has no
+                    // Print_Location__c" -- the row renders the same either way.
+                    printLocation: r.Print_Location__c || '',
+                    alsoPrintsOn: (_capi&&_capi.splitAlso)?_capi.splitAlso(r.Also_Prints_On__c):[],
+                    loadedAt:r.LastModifiedDate||null};
+        this._runSeeds[key]=seed;
+        const f=this.runForm(key, seed);
+        const sched=schedState(r);
+        const pub=sched.published;
+        return {
+          press:pressName(r.Press__c),
+          when:r.Scheduled_Start__c?(new Date(r.Scheduled_Start__c).toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'})):'unscheduled',
+          status:sched.label,
+          color:sched.accent,
+          canEdit,
+          /* REMOVED 2026-08-21: canConfirm / confirmLabel / onToggleConfirm and
+             the Confirm Schedule button they drove. Runs publish on creation
+             now, so there is nothing here for a human to validate. `pub` is
+             kept -- it still drives the warning line below, which is the only
+             thing left that cares whether this run made it onto the calendar. */
+          notPublished: !pub,
+          pressOptions:pressOptions.map(o=>({id:o.id, name:o.name})),
+          timeOptions:TIME_OPTIONS,
+          pressId:f.pressId||'', startDate:f.startDate, startTime:f.startTime,
+          endDate:f.endDate, endTime:f.endTime, qty:f.qty,
+          /* Print location, scoped to THIS run's own method -- a run belongs
+             to one Production_Method__c (PrintMethod__c), and an order can
+             carry several with different placements, so the options have to
+             follow the run rather than the order. */
+          locationShown: locationOn,
+          locationOptions: locationsFor(r.PrintMethod__c),
+          printLocation: f.printLocation||'',
+          onPrintLocation:(e)=>this.setRunField(key,{printLocation:e.target.value}),
+          alsoShown: alsoOn,
+          alsoChips: alsoOn ? _capi.alsoChips(placementsFor(r.PrintMethod__c), f.printLocation, f.alsoPrintsOn, (v)=>this.setRunField(key,{alsoPrintsOn:_capi.toggleAlso(f.alsoPrintsOn, v)})) : [],
+          /* Order total next to this run's planned count -- see
+             CAApi.runQtyHint. orderQty is already computed above via qtyOf()
+             (Order.TotalQuantity, which /api/calendar sums from OrderItem), so
+             this needs no extra data. Empty string when the total is unknown,
+             and hasQtyHint hides the line rather than printing "of 0". */
+          qtyHint: qtyHintFor(f.qty), hasQtyHint: !!qtyHintFor(f.qty),
+          busy: st.runBusy===key,
+          saveLabel: st.runBusy===key ? 'Saving…' : 'Save Changes',
+          onPress:(e)=>this.setRunField(key,{pressId:e.target.value||null}),
+          onStartDate:(e)=>this.setRunField(key,{startDate:e.target.value}),
+          onStartTime:(e)=>this.setRunField(key,{startTime:e.target.value}),
+          onEndDate:(e)=>this.setRunField(key,{endDate:e.target.value}),
+          onEndTime:(e)=>this.setRunField(key,{endTime:e.target.value}),
+          onQty:(e)=>this.setRunField(key,{qty:e.target.value}),
+          onSave:()=>this.saveRun(open, r, key),
+          onRemove:()=>this.removeRun(open, r),
+          /* 2026-10-23: Calendar check on a run being MOVED (press or times changed), never counting itself. */
+          pcRow: (()=>{ const moved=!!st.runEdits[key] && (f.pressId!==seed.pressId || f.startDate!==seed.startDate || f.startTime!==seed.startTime || f.endDate!==seed.endDate || f.endTime!==seed.endTime);
+            const pn=(pressOptions.find(o=>o.id===f.pressId)||{}).name;
+            return (moved && _capi && _capi.pressCheckBox) ? _capi.pressCheckBox(f.pressId, this.buildRunDateTime(f.startDate,f.startTime), this.buildRunDateTime(f.endDate,f.endTime), r.Id, ()=>this.setState({pcTick:Date.now()}), pn) : { pcShown:false, pc:{ rows:[] }, pcUrl:'calendar.html' }; })(),
+        };
+      });
+
+      /* Create form, prefilled so the common case is "look at it, hit Create"
+         rather than typing five fields. Three sources, in order:
+           1. the model's suggested slot, for an order with no runs at all;
+           2. the end of the LAST existing run, for an order that already has
+              one -- a second run almost always continues where the first
+              stopped, and this is a real case since Duration__c is the order
+              total split across runs;
+           3. the order's own print date, if there is neither. */
+      const sug=open.suggestion;
+      const lastEnd=(open.ProductionRuns||[])
+        .map(r=>Date.parse(r.Scheduled_End__c))
+        .filter(Number.isFinite)
+        .sort((a,b)=>b-a)[0];
+      const seedStartIso = (sug&&sug.start) ? sug.start
+        : Number.isFinite(lastEnd) ? new Date(lastEnd).toISOString()
+        : (open.Print_Date__c || null);
+      const sStart=this.splitDT(seedStartIso);
+      const seedPress = (sug&&sug.pressId) ||
+        ((open.ProductionRuns||[]).slice(-1)[0]||{}).Press__c || null;
+      const sEndIso=(sug&&sug.end) ? sug.end
+        : (seedStartIso ? new Date(Date.parse(seedStartIso)+dur*3600000).toISOString() : null);
+      const sEnd=this.splitDT(sEndIso);
+      const methods=(open.ProductionMethods||[]).filter(m=>m&&m.Id);
+      const newSeed={
+        pressId:seedPress,
+        startDate:sStart.date, startTime:sStart.time||'07:00',
+        endDate:sEnd.date||sStart.date, endTime:sEnd.time||'',
+        qty: orderQty?String(orderQty):'',
+        methodId: methods.length?methods[0].Id:null,
+        /* Default the location only when the chosen method has exactly one
+           placement -- then there is no ambiguity and typing it again is
+           busywork. With two or more, leave it blank: guessing "Front"
+           because it happens to be listed first would quietly book the wrong
+           pass, and a blank is honest. */
+        printLocation: (()=>{ const m=methods.length?methods[0]:null;
+          const pl=(m&&m.Placements)||[]; return pl.length===1?pl[0]:''; })(),
+        alsoPrintsOn: [],
+      };
+      this._runSeeds['new']=newSeed;
+      const nf=this.runForm('new', newSeed);
+      const newRun={
+        pressOptions, timeOptions:TIME_OPTIONS,
+        pressId:nf.pressId||'', startDate:nf.startDate, startTime:nf.startTime,
+        endDate:nf.endDate, endTime:nf.endTime, qty:nf.qty,
+        qtyHint: qtyHintFor(nf.qty), hasQtyHint: !!qtyHintFor(nf.qty),
+        methodId:nf.methodId||'',
+        /* Follows the method dropdown above it: switching method re-scopes the
+           locations, because the two are different jobs on the same order. */
+        locationShown: locationOn,
+        locationOptions: locationsFor(nf.methodId),
+        printLocation: nf.printLocation||'',
+        onPrintLocation:(e)=>this.setRunField('new',{printLocation:e.target.value}),
+        alsoShown: alsoOn,
+        alsoChips: alsoOn ? _capi.alsoChips(placementsFor(nf.methodId), nf.printLocation, nf.alsoPrintsOn, (v)=>this.setRunField('new',{alsoPrintsOn:_capi.toggleAlso(nf.alsoPrintsOn, v)})) : [],
+        methodOptions:methods.map(m=>({id:m.Id, name:t(m.Type__c)||'Decoration'})),
+        manyMethods:methods.length>1,
+        busy: st.runBusy==='new',
+        saveLabel: st.runBusy==='new' ? 'Creating…' : 'Create Run',
+        onPress:(e)=>this.setRunField('new',{pressId:e.target.value||null}),
+        onMethod:(e)=>this.setRunField('new',{methodId:e.target.value||null}),
+        onStartDate:(e)=>this.setRunField('new',{startDate:e.target.value}),
+        onStartTime:(e)=>this.setRunField('new',{startTime:e.target.value}),
+        onEndDate:(e)=>this.setRunField('new',{endDate:e.target.value}),
+        onEndTime:(e)=>this.setRunField('new',{endTime:e.target.value}),
+        onQty:(e)=>this.setRunField('new',{qty:e.target.value}),
+        onSave:()=>this.saveRun(open, null, 'new'),
+        /* 2026-10-23: Calendar check -- the press's other runs that day; Create refuses an overlap. */
+        pcBox: (_capi && _capi.pressCheckBox) ? _capi.pressCheckBox(nf.pressId, this.buildRunDateTime(nf.startDate,nf.startTime), this.buildRunDateTime(nf.endDate,nf.endTime), null, ()=>this.setState({pcTick:Date.now()}), (pressOptions.find(o=>o.id===nf.pressId)||{}).name) : { pcShown:false, pc:{ rows:[] }, pcUrl:'calendar.html' },
+      };
+
+      /* The AM's open suggestions for this order. Only Status__c='Proposed'
+         reaches the board (see calendar/index.js), so anything listed here is
+         still awaiting a decision from the shop. */
+      const proposals=this.openProposals(open.Proposals).map(p=>({
+        id:p.id, name:p.name,
+        machine:t(p.machineGroup)||'—',
+        when: p.proposedStart ? dayHM(p.proposedStart) : 'no date given',
+        // Press leads, then print location -- the two things a manager checks
+        // to decide whether a suggestion is usable as-is. The press is shown
+        // whether or not it survives the prefill guard above: "the AM asked
+        // for Press 2" is worth reading even when Press 2 is gone from the
+        // org, and seeing it here is what explains an empty press select.
+        meta: [t(p.pressName)||null,
+               t((window.CAApi&&window.CAApi.runLocationLabel)?window.CAApi.runLocationLabel(p.printLocation, p.alsoPrintsOn):p.printLocation)||null,
+               p.proposedHours ? p.proposedHours+(Number(p.proposedHours)===1?' hr':' hrs') : null,
+               p.quantity ? p.quantity+' pcs' : null,
+               t(p.proposedBy)||null].filter(Boolean).join(' · ') || '—',
+        notes:t(p.notes)||'', hasNotes:!!p.notes,
+        // No "Filled in" state any more -- a used suggestion leaves the list
+        // outright, so the only row that can render is one still open.
+        useLabel: 'Use this',
+        busy: st.runBusy==='prop-'+p.id,
+        onUse:()=>this.useProposal(p),
+        onReject:()=>this.rejectProposal(p),
+      }));
+
+      /* Outstanding pre-production items for this order -- anything not Ready.
+         The calendar answers "when does this print"; this answers "can it".
+         A run scheduled for Tuesday with three unfinished screens is a plan
+         waiting on somebody, and until now the board had no way to say so or
+         to hand you somewhere to go about it. */
+      /* One link PER ITEM, not one for the list. The four station boards are
+         separate places -- screens are burned at the Blue Lagoon, inks mixed at
+         the Ink Station -- so a single button could only ever be right for one
+         item and would quietly send everyone else to the wrong board.
+
+         Thread and Digitization have no station at all (there are four:
+         ink, screen, transfer, garment). Those render without a link. Guessing
+         a destination that cannot complete the item is worse than admitting
+         there isn't one. */
+      /* ── Garments in this order (E1.5) ──
+         What the drawer could say before this was a single piece count. A
+         manager booking press time wants to know it is 240 pieces across two
+         garments in three colours, not "240" -- that is the difference between
+         one run and three.
+
+         Same sizeGrid() helper the printed order sheet uses, so the screen a
+         run is scheduled from and the sheet the press works off cannot
+         disagree about what is in the order. Loading, failed and genuinely
+         empty are three different states and each says which it is. */
+      const sizeRowsRaw = st.sizes[open.Id];
+      const sizeGrid = (api.sizeGrid && sizeRowsRaw) ? api.sizeGrid(sizeRowsRaw) : null;
+      const sizeCols = sizeGrid ? sizeGrid.cols : [];
+      const sizeVm = {
+        sizeLoading: st.sizesBusy === open.Id && !sizeRowsRaw,
+        sizeFailed: !!st.sizesErr[open.Id],
+        hasSizes: !!(sizeGrid && sizeGrid.groups.length),
+        sizeEmpty: !!(sizeGrid && !sizeGrid.groups.length),
+        sizeCols: sizeCols.map(c=>({ label:c })),
+        sizeTotal: sizeGrid ? String(sizeGrid.grand) : '',
+        sizeRows: sizeGrid ? sizeGrid.groups.map(g=>({
+          garment: g.garment || '\u2014',
+          colorLabel: g.colorLabel,
+          total: String(g.total),
+          // Walk the shared column list, not the row's own keys, so every row
+          // lines up under the same headings and a size this garment doesn't
+          // have reads as a dot rather than a gap.
+          cells: sizeCols.map(c=>{ const q=g.qtys[c]; return { qty: q ? String(q) : '\u00b7', color: q ? 'var(--text-primary)' : 'var(--text-ghost)' }; }),
+        })) : [],
+      };
+      const STATION_LABEL={ink:'Ink Station', screen:'The Blue Lagoon', transfer:'Transfer Station', garment:'Garment Station'};
+      const prepItems=(open.OpenPrepItems||[]).map(it=>({
+        id:it.id,
+        type:t(it.type)||'Item',
+        detail:t(it.detail)||'',
+        hasDetail:!!it.detail,
+        method:t(it.methodType)||'',
+        status:t(it.status)||'Not Started',
+        // In Progress reads as movement, Not Started as a standing risk -- the
+        // second is the one worth catching a manager's eye.
+        statusColor: it.status==='In Progress' ? AMBER : CRIT,
+        hasStation: !!it.station,
+        stationLabel: STATION_LABEL[it.station] || '',
+        // Carrying the stage lands them on the tab the item is actually
+        // sitting on rather than the station's master list. station.html
+        // validates ?tab against that station's own stages and falls back to
+        // master, so an unexpected value degrades instead of breaking.
+        stationHref: it.station
+          ? 'station.html?station='+encodeURIComponent(it.station)+(it.stage?('&tab='+encodeURIComponent(it.stage)):'')
+          : '',
+      }));
+
+      return {
+        runsEditable: canEdit,
+        prepItems, hasPrepItems: prepItems.length>0,
+        ...sizeVm,
+        prepCountLabel: prepItems.length+(prepItems.length===1?' item still open':' items still open'),
+        proposals, hasProposals: proposals.length>0 && canEdit,
+        newRun,
+        // Two mutually exclusive faces of the same thing: a one-line button
+        // when shut, the full form when open.
+        newRunShut: canEdit && !st.newRunOpen,
+        newRunOpen: canEdit && !!st.newRunOpen,
+        onToggleNewRun:()=>this.setState({newRunOpen:!this.state.newRunOpen, runErr:''}),
+        // Shortfall on THIS order. The button opens the run form the same way
+        // useProposal does -- this board seeds a form by opening it and letting
+        // the manager pick the press and slot, which is the part only they can
+        // decide. The quantity is the bit worth carrying across, so it is said
+        // in the banner text rather than left in the badge upstairs.
+        hasShortfall: (Number(st.shortfalls[open.Id])||0) > 0,
+        shortfallQty: String(Number(st.shortfalls[open.Id])||0),
+        shortfallCanAct: canEdit,
+        onScheduleMakeup:()=>this.setState({newRunOpen:true, runErr:''}),
+        qtyLabel: orderQty ? orderQty.toLocaleString()+(orderQty===1?' piece':' pieces') : 'no piece count on this order',
+        qtyColor: orderQty ? DIM : AMBER,
+        runErr:st.runErr, hasRunErr:!!st.runErr,
+        runMsg:st.runMsg, hasRunMsg:!!st.runMsg,
+        num:window.CAApi.orderNum(open),
+        customer:t(open.Account&&open.Account.Name)||'—',
+        job:t(open.Customer_Order_Name__c)||'—',
+        method:t(((open.ProductionMethods||[])[0]||{}).Type__c)||'—',
+        score:(p.score||1).toFixed(1), scoreColor:scoreColor(p.score||1),
+        // D34: urgency counts down to the tighter of print date and ship-by, so
+        // the line under the score names whichever deadline is driving it.
+        daysLabel: p.days==null?'no print date set'
+          : p.deadline==='shipBy'
+            ? (p.days<0?'ship-by passed '+Math.abs(p.days)+(Math.abs(p.days)===1?' day ago':' days ago'): p.days===0?'must ship today': p.days===1?'must ship tomorrow':'must ship in '+p.days+' days')
+            : (p.days<0?Math.abs(p.days)+' days overdue': p.days===0?'prints today': p.days===1?'prints tomorrow':'prints in '+p.days+' days'),
+        shipWarn: (p.daysPrint!=null && p.daysShip!=null && p.daysPrint>p.daysShip),
+        shipWarnText: (function(){ const d=window.CAApi.parseSfDate(open.Ship_By_formula__c); return 'Prints after its ship-by date'+(d?' ('+d.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'})+')':'')+'. The score is counting down to ship-by, not the print date.'; })(),
+        bars:barsOf(p),
+        parts:contribs(p).map((v,i)=>({label:PART_LABELS[i], value:v.toFixed(1), color:RAMP[i]})),
+        prepLabel:t(open.prep&&open.prep.label)||'—', prepColor:prepColor(open.prep&&open.prep.key), prepIcon:prepIcon(open.prep&&open.prep.key),
+        readyPct:Math.round((p.ready||0)*100)+'%',
+        runs, noRuns:runs.length===0,
+        suggestion: open.suggestion&&open.suggestion.start ? ('Suggested '+t(open.suggestion.pressName||'')+' at '+hhmm(open.suggestion.start)+'.') : '',
+        hasNotes:!!open.Priority_Notes__c, notes:t(open.Priority_Notes__c),
+      };
+    })() : {};
+
+    /* env modal */
+    const envActive=(st.env&&st.env.active)||'';
+    const sfEnvOptions=((st.env&&st.env.environments)||[]).map(e=>{
+      const picked = st.sfEnvPick===e.key;
+      return {
+        label:e.label, isActive:!!e.active,
+        statusLabel: e.active?'Currently active for everyone' : e.configured?'Configured — ready to switch to':'Not configured yet',
+        bg: picked?'#1a1a1e':'#101013',
+        border: picked?'#C6372B' : e.active?'#3D5418':'#202024',
+        dotColor: e.active?GREEN : e.configured?MUT:FAINT,
+        textColor: e.configured?INK:DIM,
+        cursor: e.configured?'pointer':'not-allowed',
+        onPick:()=>{ if(e.configured) this.setState({sfEnvPick:e.key, sfEnvErr:''}); },
+      };
+    });
+
+    /* identity gate */
+    const pin=st.gatePin||'';
+    const gatePad=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(l=>{
+      const isBack=l==='⌫', isBlank=l==='';
+      return {
+        label:isBack?'':l, isIcon:isBack, isText:!isBack, icon:'ti-backspace',
+        bg:isBlank?'transparent':'#141417', border:isBlank?'transparent':'#232327', color:isBlank?'transparent':INK,
+        onPress:()=>{
+          if(isBlank || st.gateSubmitting) return;
+          if(isBack){ this.setState({gatePin:pin.slice(0,-1), gateErr:''}); return; }
+          if(pin.length>=4) return;
+          const next=pin+l;
+          this.setState({gatePin:next, gateErr:''});
+          if(next.length===4) setTimeout(()=>this.submitGate(next),140);
+        },
+      };
+    });
+
+    const navBoards = (api&&api.buildNavBoards) ? api.buildNavBoards('calendar') : [];
+    const worker = (api&&api.anyWorkerName&&api.anyWorkerName()) || '';
+    const viewTabs = [
+      {key:'day', label:'Day', icon:'ti-clock-hour-4'},
+      {key:'3day', label:'3 Day', icon:'ti-columns-3'},
+      {key:'week', label:'Week', icon:'ti-layout-columns'},
+    ].map(v=>({
+      label:v.label, icon:v.icon,
+      bg: st.view===v.key?'#241110':'transparent',
+      border: st.view===v.key?'#7A241C':'#2a2a2f',
+      textColor: st.view===v.key?'#E8A89F':MUT,
+      onPick:()=>{ if(st.view!==v.key) this.setState({view:v.key},()=>this.load()); },
+    }));
+
+    return {
+      /* Live, connected, and the org has no Press records at all. Says so
+         instead of quietly showing demo presses -- see presses(). Deliberately
+         not shown while conn is 'loading' (the list is legitimately empty then)
+         or in demo mode (where the fixtures ARE the point). */
+      noPresses: st.conn==='live' && presses.length===0,
+      sideOpen:!(st.sideClosed===undefined ? (function(){ try{ return (function(v){ return v===null ? (window.innerWidth<900) : v==='1'; })(localStorage.getItem('caSideClosed')); }catch(_){ return false; } })() : st.sideClosed),
+      sideToggleIcon:'ti-menu-2', sideToggleTitle:'Show / hide sidebar',
+      onToggleSide:()=>{ let cur=this.state.sideClosed; if(cur===undefined){ try{ cur=(function(v){ return v===null ? (window.innerWidth<900) : v==='1'; })(localStorage.getItem('caSideClosed')); }catch(_){ cur=false; } } const v=!cur; try{ localStorage.setItem('caSideClosed', v?'1':'0'); }catch(_){} this.setState({sideClosed:v}); },
+      navBoards, navOpen:st.navOpen,
+      worker: worker || 'Not signed in',
+      workerInit: worker ? worker.slice(0,1).toUpperCase() : '?',
+      clock: st.now.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}),
+      dateStr: st.now.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'}),
+      connColor: st.conn==='live'?GREEN:st.conn==='loading'?DIM:(st.conn==='demo'?AMBER:'#C6372B'),
+      connLabel: st.conn==='live'?'Live · Salesforce':st.conn==='loading'?'Connecting…':(st.conn==='demo'?'Demo data':'Not connected'),
+      /* Where the bookings would have been. Shown only when the load failed,
+         so an ordinary quiet week still reads as a quiet week. */
+      loadErrMsg: st.conn==='error'
+        ? ((window.CAApi && window.CAApi.listNotice) ? window.CAApi.listNotice('error', '', st.loadErr) : 'This calendar could not be loaded.')
+        : '',
+      showLoadErr: st.conn==='error',
+      isAdmin: !!(api&&api.isAdmin&&api.isAdmin()),
+      sfEnvLabel: envActive || 'Dev2',
+      readOnly: !canEdit,
+      q:st.q, viewTabs,
+      rangeLabel: st.view==='day'
+        ? start.toLocaleDateString([], {weekday:'long', month:'short', day:'numeric'})
+        : start.toLocaleDateString([], {month:'short', day:'numeric'})+' – '+(()=>{const e=new Date(start);e.setDate(e.getDate()+span-1);return e.toLocaleDateString([], {month:'short', day:'numeric'});})(),
+      // E4.5: "0 orders in window" is a fact about the week; don't state it
+      // before the week has been fetched.
+      shownLabel: st.conn==='loading' ? 'Loading…' : (live.length+(live.length===1?' order':' orders')+(st.q?' matching':' in window'))
+        // Finished jobs are on the grid but not in the count, so say so --
+        // otherwise the number and the number of blocks disagree and the board
+        // looks broken.
+        +((scoped.length-live.length)>0 ? '  ·  '+(scoped.length-live.length)+' finished' : ''),
+      kpis,
+      queue, queueCount:queue.length, queueEmpty: queue.length===0,
+      queueHint: canEdit ? 'Highest priority first. Drag one onto a press to schedule it.' : 'Highest priority first. Managers and admins can drag these onto a press.',
+      scoreLegend: PART_LABELS.map((l,i)=>({label:l, color:RAMP[i]})),
+      prepLegend: [{label:'Ready / Great', color:GREEN},{label:'Mediocre', color:AMBER},{label:'Very bad', color:CRIT}],
+      calendars,
+      gridTitle: (activeGroup==='all' ? 'Master Calendar' : ((groupDef&&groupDef.label)||'Calendar'))
+                 + ' · ' + (st.view==='day' ? start.toLocaleDateString([], {weekday:'long', month:'short', day:'numeric'})
+                            : st.view==='3day' ? '3 Days' : 'Week'),
+      gridHint: 'Shop hours '+SHOP_START+':00 – '+SHOP_END+':00'
+                + (ungrouped ? ' · '+ungrouped+' press'+(ungrouped===1?'':'es')+' not in any group — Master only' : ''),
+      // Six day columns plus the hour gutter have to clear the 330px queue
+      // beside them without pushing Saturday off the edge at a normal laptop
+      // width -- that was the first thing this layout got wrong.
+      gridCols: '58px repeat('+dayCount+', minmax('+COL_PX+'px,1fr))',
+      gridMinW: (58 + dayCount*(COL_PX+4) + 8)+'px',
+      rowH: ROW_H+'px',
+      trackH: trackH+'px',
+      // One line per hour, drawn as a background rather than 9 more elements
+      // per day column -- with 6 days that is 54 divs saved every render.
+      hourLines: 'repeating-linear-gradient(to bottom, transparent 0, transparent '+(ROW_H-1)+'px, #16161a '+(ROW_H-1)+'px, #16161a '+ROW_H+'px)',
+      hourLabels, headers, cols,
+      gridFooter: st.conn==='demo'
+        ? 'Demo data — not connected to Salesforce.'
+        : 'Dashed blocks are suggestions from the priority model; dragging one confirms it and updates the order’s print date.',
+      drawerOpen: !!open, d,
+      drawerHasFramesChip: !!open && !!((st.framesByOrder||{})[open.Id]||[]).length,
+      drawerFramesChip: open && window.CAApi && window.CAApi.framesChipText ? window.CAApi.framesChipText((st.framesByOrder||{})[open.Id]) : '',
+      sfEnvOpen: st.sfEnvOpen, sfEnvOptions, sfEnvPin: st.sfEnvPin,
+      sfEnvHasMsg: !!st.sfEnvMsg, sfEnvMsg: st.sfEnvMsg,
+      sfEnvHasErr: !!st.sfEnvErr, sfEnvErr: st.sfEnvErr,
+      sfEnvSubmitLabel: st.sfEnvSubmitting ? 'Switching…' : 'Switch Environment',
+      nameGateOpen: !st.nameOk,
+      gateDots: [0,1,2,3].map(i=>({border: i<pin.length?RED:'#2a2a2f', bg: i<pin.length?RED:'transparent'})),
+      gateStatusText: st.gateErr || (st.gateSubmitting?'Verifying…':''),
+      gateStatusColor: st.gateErr?'#E8A89F':DIM,
+      gateShakeAnim: st.gateShake?'ca-shake .45s':'none',
+      gatePad,
+      onSearch:this.onSearch.bind(this), onRefresh:this.onRefresh.bind(this),
+      onOpenNav:this.onOpenNav.bind(this), onCloseNav:this.onCloseNav.bind(this),
+      onPrev:this.onPrev.bind(this), onNext:this.onNext.bind(this), onToday:this.onToday.bind(this),
+      onCloseDrawer:this.onCloseDrawer.bind(this),
+      onOpenSfEnv:this.onOpenSfEnv.bind(this), onCloseSfEnv:this.onCloseSfEnv.bind(this),
+      onSfEnvPin:this.onSfEnvPin.bind(this), onSubmitSfEnv:this.onSubmitSfEnv.bind(this),
+      onSwitchUser:this.onSwitchUser.bind(this), onLogout:this.onLogout.bind(this),
+    };
+  }
+}
+</script>
+</body>
+</html>
