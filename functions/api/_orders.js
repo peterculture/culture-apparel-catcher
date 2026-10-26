@@ -153,7 +153,8 @@ async function buildOrders(env, orders) {
     const lines = [...groups.values()].map((g) => {
       const sizes = [...g.sizes.entries()].sort((a, b) => sizeRank(a[0]) - sizeRank(b[0]))
         .map(([size, qty]) => ({ size, qty, boxed: 0 }));
-      return { product: g.product, color: g.color, sizes, total: sizes.reduce((a, s) => a + s.qty, 0) };
+      // extras: sizes NOT on the order that have been boxed anyway ("Add More"), e.g. [{ size: "2XL", boxed: 3 }]
+      return { product: g.product, color: g.color, sizes, extras: [], total: sizes.reduce((a, s) => a + s.qty, 0) };
     });
     // Name = "Garment Type" (e.g. "Tees 2"); Packaging_Quantity__c = the box's total;
     // Quantity_Size_Counted__c = the size breakdown (blank on boxes logged before 10-15).
@@ -168,9 +169,19 @@ async function buildOrders(env, orders) {
       editable: canChange({ at: b.CreatedDate }, now),
     }));
     // How many of each size are already in a box (only boxes with a size breakdown count).
+    // Extras ("Add More") are kept apart, so "boxed" never counts them against the order's sizes.
+    let extraBoxed = 0;
     for (const b of orderBoxes) for (const c of b.counts) {
-      const s = lines[c.line].sizes.find((x) => x.size === c.size);
-      s.boxed += c.qty;
+      const line = lines[c.line];
+      if (!line) continue;
+      if (c.extra) {
+        let e = line.extras.find((x) => x.size === c.size);
+        if (!e) line.extras.push(e = { size: c.size, boxed: 0 });
+        e.boxed += c.qty; extraBoxed += c.qty;
+        continue;
+      }
+      const s = line.sizes.find((x) => x.size === c.size);
+      if (s) s.boxed += c.qty;
     }
     return {
       id: o.Id,
@@ -191,6 +202,7 @@ async function buildOrders(env, orders) {
       finishedCount: o.Packaging_Count__c != null ? Number(o.Packaging_Count__c) : null,
       lines,
       total: lines.reduce((a, l) => a + l.total, 0),
+      extraBoxed,
       boxes: orderBoxes,
     };
   });

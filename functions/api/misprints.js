@@ -89,7 +89,7 @@ export async function onRequestPost({ request, env }) {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const order = await loadOneOrder(env, orderId);
-      const lineSizes = new Set(order.lines.flatMap((l) => l.sizes.map((s) => s.size)));
+      const lineSizes = new Set(order.lines.flatMap((l) => l.sizes.map((s) => s.size).concat((l.extras || []).map((e) => e.size))));
       if (lineSizes.size && !lineSizes.has(size)) {
         return json({ error: "bad_size", message: `This order has no size ${size}. Pick a size from the list.` }, 400);
       }

@@ -13,11 +13,27 @@
  *   order with one garment:      "S 8 · M 15 · L 17 · XL 10 = 50"
  *   order with several garments: "Blue Spruce Comfort Colors 1717: S 8 · M 15 | Ivory Comfort Colors 3023CL: L 4 = 27"
  * Several garments in one box are allowed.
+ *
+ * EXTRAS (Anthony 2026-10-26): the garment supplier sometimes sends extras, and the
+ * shop prints and boxes them for the customer. A box can hold a size that ISN'T on
+ * the order ("Add More" on the box form). Those are written with " (extra)":
+ *   "S 8 · M 15 · 2XL 3 (extra) = 26"
+ * Extras count toward the box's total (Packaging_Quantity__c), because they really
+ * are in the box. (Extras of a size already on the order are just counted in that
+ * size, past what the order lists.)
  */
 export const SIZE_FIELD = "Quantity_Size_Counted__c";
 export const SIZE_FIELD_MAX = 255;
 
 const SEP_ITEM = " · ", SEP_GROUP = " | ";
+export const EXTRA_MARK = " (extra)";
+const EXTRA_SIZE_RE = /^[A-Z0-9][A-Z0-9 \/.-]{0,9}$/;
+
+/** An extra size typed or picked on the tablet -> "2XL", or "" if it can't be used. */
+export function cleanExtraSize(s) {
+  const v = String(s == null ? "" : s).toUpperCase().replace(/\s+/g, " ").trim();
+  return EXTRA_SIZE_RE.test(v) ? v : "";
+}
 
 function cleanPart(s, max) {
   return String(s == null ? "" : s).replace(/[:|·=\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
@@ -53,9 +69,11 @@ export function buildBreakdown(lines, counts) {
     const groups = order.map((li) => {
       const line = lines[li];
       // sizes in the order they appear on the order (S, M, L ...)
+      // (extras -- sizes not on the order -- come after the order's own sizes)
       const rank = new Map(line.sizes.map((s, i) => [s.size, i]));
-      const items = byLine.get(li).sort((a, b) => rank.get(a.size) - rank.get(b.size))
-        .map((c) => `${c.size} ${c.qty}`).join(SEP_ITEM);
+      const r = (c) => (c.extra ? 1000 : (rank.has(c.size) ? rank.get(c.size) : 999));
+      const items = byLine.get(li).slice().sort((a, b) => r(a) - r(b))
+        .map((c) => `${c.size} ${c.qty}${c.extra ? EXTRA_MARK : ""}`).join(SEP_ITEM);
       return (multi ? garmentLabel(line, li, level) + ": " : "") + items;
     });
     const text = groups.join(SEP_GROUP) + ` = ${total}`;
@@ -90,10 +108,18 @@ export function parseBreakdown(lines, text) {
       items = group.slice(at + 2);
     }
     for (const item of items.split(SEP_ITEM)) {
-      const m = item.trim().match(/^(.*\S)\s+(\d{1,4})$/);
+      const m = item.trim().match(/^(.*\S)\s+(\d{1,4})(\s+\(extra\))?$/);
       if (!m) return [];
       const size = m[1];
-      if (!lines[li] || !lines[li].sizes.some((s) => s.size === size)) return [];
+      if (!lines[li]) return [];
+      const onOrder = lines[li].sizes.some((s) => s.size === size);
+      if (m[3]) {
+        // an extra: a size beyond the order (if the order has since gained that size, it counts there)
+        if (cleanExtraSize(size) !== size) return [];
+        out.push(onOrder ? { line: li, size, qty: Number(m[2]) } : { line: li, size, qty: Number(m[2]), extra: true });
+        continue;
+      }
+      if (!onOrder) return [];
       out.push({ line: li, size, qty: Number(m[2]) });
     }
   }
