@@ -87,6 +87,7 @@ globalThis.fetch = async (url, init = {}) => {
     const q = u.searchParams.get("q");
     if (/FROM Order WHERE/.test(q)) {
       if (behave.queryFail) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column" }]);
+      if (behave.noDeliveryField && /Shipping_Delivery__c/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column 'Shipping_Delivery__c' on entity 'Order'" }]);
       const idm = q.match(/AND Id = '([^']+)'/);
       const carry = /Packaging_Count__c = null/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : "";
       const review = !/Order_Substatus__c = 'Production'/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : null;
@@ -855,6 +856,33 @@ await test("Counted By: new boxes and duplicates get the signed-in catcher; edit
   const l = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, maria), env })).json()).orders[0];
   const shown = l.boxes.find((x) => x.id === b.Id);
   ok(shown.by === "Maria R." && l.boxes.find((x) => x.name === "Tees 1").by === "Catcher App", "app shows Counted By; old boxes fall back to Created By");
+});
+
+await test("Delivery Method badge: read from Order.Shipping_Delivery__c", async () => {
+  reset(); const env = ENV(); const c = await signIn(env, "4821");
+  const vals = ["Split Ship", "Order Fulfillment", null];
+  db.orders.forEach((o, i) => { o.Shipping_Delivery__c = vals[i % vals.length]; });
+  const r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, c), env });
+  const list = (await r.json()).orders;
+  const q = decodeURIComponent(calls.filter((x) => /FROM\+?%20?Order%20WHERE|FROM Order WHERE/.test(decodeURIComponent(x.url))).pop().url);
+  ok(/Shipping_Delivery__c/.test(q), "the order query reads Shipping_Delivery__c");
+  const byId = Object.fromEntries(list.map((o) => [o.id, o.delivery]));
+  const first = db.orders.find((o) => o.Shipping_Delivery__c === "Split Ship");
+  ok(byId[first.Id] && byId[first.Id].key === "split" && byId[first.Id].label === "SPLIT SHIP", "Split Ship -> SPLIT SHIP badge");
+  const ful = db.orders.find((o) => o.Shipping_Delivery__c === "Order Fulfillment");
+  if (ful && byId[ful.Id]) ok(byId[ful.Id].key === "fulfillment" && byId[ful.Id].label === "FULFILLMENT", "Order Fulfillment -> FULFILLMENT badge");
+  const blank = db.orders.find((o) => o.Shipping_Delivery__c == null && byId[o.Id]);
+  if (blank) ok(byId[blank.Id].key === "none", "blank -> NO DELIVERY METHOD");
+});
+
+await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
+  reset(); const env = ENV(); const c = await signIn(env, "4821");
+  behave.noDeliveryField = true;
+  const r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, c), env });
+  ok(r.status === 200, "the board still loads when Salesforce refuses the field");
+  const list = (await r.json()).orders;
+  ok(list.length > 0 && list.every((o) => o.delivery == null), "no badge data sent");
+  behave.noDeliveryField = false;
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

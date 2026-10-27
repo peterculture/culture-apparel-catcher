@@ -79,6 +79,7 @@ Map<String, Boolean> fields = new Map<String, Boolean>{
     'Order.Print_Date__c' => false, 'Order.Specifications_for_Printing__c' => false, 'Order.Artwork_URL__c' => false,
     'Order.TotalQtyMisprints__c' => true, 'Order.Misprint_Details__c' => true,
     'Order.Packaging_Count__c' => true,
+    'Order.Shipping_Delivery__c' => false,   // 10-27: Delivery Method badge (read only)
     'OrderItem.Size__c' => false, 'OrderItem.Color__c' => false,
     'OrderItem.Misprint_Quantity__c' => true, 'OrderItem.Damaged_Quantity__c' => true,
     'Order_Packaging__c.Order__c' => true, 'Order_Packaging__c.Packaging_Type__c' => true,
