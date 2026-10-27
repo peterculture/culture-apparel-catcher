@@ -43,6 +43,42 @@ const ORDER_FIELDS = [
   "Order_Substatus__c", "Packaging_Count__c",
 ];
 
+/* Delivery Method (Order.Shipping_Delivery__c, picklist), shown as a badge on the tablet (10-27).
+ * Read only if the app's login can see it: until tools/catcher-app-access.apex has been run with
+ * this field, Salesforce answers INVALID_FIELD, so the app leaves the field out for 10 minutes
+ * and tries again (no redeploy needed once the script is run). */
+export const DELIVERY_FIELD = "Shipping_Delivery__c";
+let deliveryOffUntil = 0;
+const DELIVERY = {
+  "Pickup": { key: "pickup", label: "PICKUP" },
+  "Order Fulfillment": { key: "fulfillment", label: "FULFILLMENT" },
+  "Shipping": { key: "shipping", label: "SHIPPING" },
+  "Delivery": { key: "delivery", label: "DELIVERY" },
+  "Split Ship": { key: "split", label: "SPLIT SHIP" },
+};
+/** Picklist value -> { key, label }. null when the field wasn't read (badge hidden). */
+export function deliveryOf(row) {
+  if (!row || !(DELIVERY_FIELD in row)) return null;
+  const v = String(row[DELIVERY_FIELD] || "").trim();
+  if (!v) return { key: "none", label: "NO DELIVERY METHOD" };
+  return DELIVERY[v] || { key: "other", label: plainText(v).toUpperCase().slice(0, 30) };
+}
+/** SELECT Order rows, with Delivery Method when it can be read. */
+async function selectOrders(env, rest) {
+  const withDelivery = Date.now() >= deliveryOffUntil;
+  const fields = withDelivery ? [...ORDER_FIELDS, DELIVERY_FIELD] : ORDER_FIELDS;
+  try {
+    return await runQuery(env, `SELECT ${fields.join(", ")} FROM Order WHERE ${rest}`);
+  } catch (err) {
+    if (!withDelivery || !(err instanceof SfError) || err.detail !== "INVALID_FIELD") throw err;
+    // Was it this field? Only if the same query works without it.
+    const rows = await runQuery(env, `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${rest}`);
+    console.warn("Delivery Method not readable by the app's login (run tools/catcher-app-access.apex); badges hidden for 10 minutes");
+    deliveryOffUntil = Date.now() + 10 * 60 * 1000;
+    return rows;
+  }
+}
+
 const SEEN_KEY = "board:seen";
 const SEEN_MS = 14 * 86400000;
 
@@ -82,8 +118,7 @@ export async function loadOrders(env, { orderId } = {}) {
   let where = `(${inProductionWhere(env)})`;
   if (carry.length) where = `(${where} OR (Id IN (${carry.map(soqlQuote).join(",")}) AND Packaging_Count__c = null))`;
   if (orderId) where += ` AND Id = ${soqlQuote(orderId)}`;
-  const orders = await runQuery(env,
-    `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${where} ORDER BY Print_Date__c ASC, OrderNumber ASC LIMIT 200`);
+  const orders = await selectOrders(env, `${where} ORDER BY Print_Date__c ASC, OrderNumber ASC LIMIT 200`);
   if (!orders.length) { if (!orderId) await writeSeen(env, seen, []); return []; }
   const result = await buildOrders(env, orders);
   if (!orderId) await writeSeen(env, seen, result);
@@ -114,8 +149,7 @@ export function canChange(box, now = Date.now()) {
 export async function loadReviewOrders(env, orderIds) {
   const ids = orderIds.filter((id) => SF_ID.test(id)).slice(0, 100);
   if (!ids.length) return [];
-  const orders = await runQuery(env,
-    `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE Id IN (${ids.map(soqlQuote).join(",")})` +
+  const orders = await selectOrders(env, `Id IN (${ids.map(soqlQuote).join(",")})` +
     ` AND Printer__r.Name IN (${printerNames(env).map(soqlQuote).join(",")}) LIMIT 100`);
   return orders.length ? buildOrders(env, orders) : [];
 }
@@ -197,6 +231,7 @@ async function buildOrders(env, orders) {
       customer: (o.Account && o.Account.Name) || "",
       printDate: o.Print_Date__c || null,
       printer: (o.Printer__r && o.Printer__r.Name) || "",
+      delivery: deliveryOf(o),
       specs: plainText(o.Specifications_for_Printing__c).slice(0, 300),
       misprintTotal: Number(o.TotalQtyMisprints__c) || 0,
       misprintDetails: o.Misprint_Details__c || "",
