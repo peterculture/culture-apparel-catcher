@@ -95,7 +95,10 @@ globalThis.fetch = async (url, init = {}) => {
       if (idm) recs = recs.filter((o) => o.Id === idm[1]);
       return res(200, { done: true, records: recs.map((o) => { const { _inProd, ...r } = o; return Object.assign({ Order_Substatus__c: _inProd ? "Production" : "Post-Production", Packaging_Count__c: null }, r); }) });
     }
-    if (/FROM OrderItem/.test(q)) return res(200, { done: true, records: db.items.filter((i) => q.includes(i.OrderId)) });
+    if (/FROM OrderItem/.test(q)) {
+      db.items.forEach((i, n) => { if (!i.Id) i.Id = "802" + String(n + 1).padStart(15, "0"); if (!i.LastModifiedDate) i.LastModifiedDate = "2026-10-14T16:00:00.000+0000"; });
+      return res(200, { done: true, records: db.items.filter((i) => q.includes(i.OrderId)) });
+    }
     if (/FROM Order_Packaging__c WHERE CreatedDate = LAST_N_DAYS:(\d+)/.test(q)) {
       const days = Number(q.match(/LAST_N_DAYS:(\d+)/)[1]);
       const recs = db.boxes.filter((b) => Date.parse(b.CreatedDate) > Date.now() - days * 86400000).sort((a, b) => b.CreatedDate.localeCompare(a.CreatedDate));
@@ -160,12 +163,39 @@ globalThis.fetch = async (url, init = {}) => {
     if (behave.patch412 && behave.patch412-- > 0) {
       // someone else added a misprint a moment ago
       o.TotalQtyMisprints__c = (o.TotalQtyMisprints__c || 0) + 2;
-      o.Misprint_Details__c = mis.totalHeading(o.TotalQtyMisprints__c) + " 2 S - Burned (Dev T. 10/14)";
+      o.Misprint_Details__c = "2 S - Burned (Dev T. 10/14)";
       o.LastModifiedDate = "2026-10-14T17:00:00.000+0000";
       return new Response(null, { status: 412 });
     }
     if (behave.validation) return res(400, [{ errorCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "Production and Delivery Dates are required to proceed." }]);
     Object.assign(o, JSON.parse(init.body), { LastModifiedDate: new Date().toISOString() });
+    return new Response(null, { status: 204 });
+  }
+  if (u.pathname.endsWith("/composite") && method === "POST") {
+    if (behave.misTimeout) throw new Error("timeout");
+    const b = JSON.parse(init.body);
+    const snap = JSON.stringify({ orders: db.orders, items: db.items });
+    const out = [];
+    let failed = -1;
+    for (let i = 0; i < b.compositeRequest.length; i++) {
+      const sr = b.compositeRequest[i];
+      if (failed >= 0) { out.push({ referenceId: sr.referenceId, httpStatusCode: 400, body: [{ errorCode: "PROCESSING_HALTED", message: "halted" }] }); continue; }
+      const r = await globalThis.fetch("https://ca.my.salesforce.com" + sr.url, { method: sr.method, headers: Object.assign({}, sr.httpHeaders || {}), body: JSON.stringify(sr.body) });
+      const body = r.status === 204 ? null : await r.json().catch(() => null);
+      out.push({ referenceId: sr.referenceId, httpStatusCode: r.status, body });
+      if (r.status >= 300) failed = i;
+    }
+    if (failed > 0 && b.allOrNone) { const back = JSON.parse(snap); db.orders = back.orders; db.items = back.items; }
+    return res(200, { compositeResponse: out });
+  }
+  const im = u.pathname.match(/\/sobjects\/OrderItem\/(\w+)$/);
+  if (im && method === "PATCH") {
+    const it = db.items.find((x) => x.Id === im[1]);
+    if (!it) return res(404, [{ errorCode: "NOT_FOUND", message: "no such line" }]);
+    if (behave.itemLocked) return res(400, [{ errorCode: "FIELD_INTEGRITY_EXCEPTION", message: "You can't edit an order product on an activated order." }]);
+    const ius = (init.headers || {})["If-Unmodified-Since"];
+    if (ius && Math.floor(Date.parse(it.LastModifiedDate) / 1000) > Math.floor(Date.parse(ius) / 1000)) return new Response(null, { status: 412 });
+    Object.assign(it, JSON.parse(init.body), { LastModifiedDate: new Date(Date.now() + 1000).toISOString() });
     return new Response(null, { status: 204 });
   }
   return res(404, [{ errorCode: "NOT_FOUND", message: "fake: no route " + method + " " + u.pathname }]);
@@ -302,13 +332,13 @@ await test("Box: timeout -> UNCONFIRMED, and a quick retry can't duplicate", asy
 });
 
 await test("Misprint details format", async () => {
-  ok(mis.totalHeading(3) === "TOTAL QTY: 03", "heading 3");
-  ok(mis.totalHeading(3).slice(10, 13).trim() === "03", "number sits at characters 11-13");
-  ok(mis.totalHeading(140).slice(10, 13) === "140", "three-digit totals also fit 11-13");
-  ok(mis.existingNotes("TOTAL QTY: 03 stained M") === "stained M", "heading stripped");
+  ok(typeof mis.totalHeading === "undefined", "no TOTAL QTY heading any more (10-27)");
+  ok(mis.existingNotes("TOTAL QTY: 03 stained M") === "stained M", "an old heading is dropped");
   ok(mis.existingNotes("off centered") === "off centered", "free text kept as is");
-  const long = "x".repeat(240);
-  ok(mis.buildDetails(long, 5, { qty: 1, size: "M", garment: "Navy Gildan", reason: "Stained", note: "", who: "Maria R.", date: "10/14" }) === null, "too long -> null");
+  const p = { qty: 1, size: "M", garment: "Navy Gildan", reason: "Stained", note: "", who: "Maria R.", date: "10/14" };
+  ok(mis.buildDetails("", p) === "1 M Navy Gildan - Stained (Maria R. 10/14)", "first line, no heading: " + mis.buildDetails("", p));
+  ok(mis.buildDetails("TOTAL QTY: 02 off centered", p) === "off centered | 1 M Navy Gildan - Stained (Maria R. 10/14)", "old heading dropped, notes kept");
+  ok(mis.buildDetails("x".repeat(240), p) === null, "too long -> null");
 });
 
 await test("Report a misprint", async () => {
@@ -318,11 +348,15 @@ await test("Report a misprint", async () => {
   let d = await r.json();
   ok(r.status === 200 && d.misprintTotal === 5, "3 + 2 = 5");
   const p = posts("/sobjects/Order/801000000000002AAA")[0]; const sent = JSON.parse(p.body);
-  ok(Object.keys(sent).sort().join() === "Misprint_Details__c,TotalQtyMisprints__c", "writes only the two misprint fields");
+  ok(Object.keys(sent).sort().join() === "Misprint_Details__c,TotalQtyMisprints__c", "writes only the two misprint fields on the Order");
   ok(sent.TotalQtyMisprints__c === 5, "total 5");
-  ok(/^TOTAL QTY: 05 stained M \(Dev 10\/13\) \| 2 XL Black Richardson 112 Hat - Off-center: left logo \(Maria R\. \d+\/\d+\)$/.test(sent.Misprint_Details__c), "heading + old note + new line: " + sent.Misprint_Details__c);
+  ok(/^stained M \(Dev 10\/13\) \| 2 XL Black Richardson 112 Hat - Off-center: left logo \(Maria R\. \d+\/\d+\)$/.test(sent.Misprint_Details__c), "old note + new line, no heading: " + sent.Misprint_Details__c);
   ok(sent.Misprint_Details__c.length <= 255, "fits 255");
   ok(!!p.headers["If-Unmodified-Since"], "sent with 'only if unchanged since I read it'");
+  const hat = db.items.find((i) => i.OrderId === "801000000000002AAA" && i.Size__c === "XL");
+  ok(hat.Misprint_Quantity__c === 2 && !hat.Damaged_Quantity__c, "the XL line's Misprint Quantity is now 2");
+  ok(posts("/composite").length === 1 && JSON.parse(posts("/composite")[0].body).allOrNone === true, "one all-or-nothing request");
+  ok(d.misprint.stored && d.misprint.stored.field === "misprinted", "answer says where it went");
   r = await mis.onRequestPost({ request: req("POST", "/api/misprints", body, cookie), env });
   ok(posts("/sobjects/Order/").length === 1, "same request id twice -> written once");
 });
@@ -336,6 +370,48 @@ await test("Misprint: two catchers at once don't overwrite each other", async ()
   ok(r.status === 200, "saved after one re-read");
   ok(o.TotalQtyMisprints__c === 3, "2 from the other catcher + 1 = 3 (not 1)");
   ok(/Burned/.test(o.Misprint_Details__c) && /Stained/.test(o.Misprint_Details__c), "both notes kept: " + o.Misprint_Details__c);
+});
+
+await test("Misprint per size on the order line (for the Production Error screen)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const O = "801000000000001AAA";
+  const send = (b, id) => mis.onRequestPost({ request: req("POST", "/api/misprints", Object.assign({ orderId: O, garment: "Navy Gildan 5000 Tee", requestId: id }, b), cookie), env });
+  const line = (size) => db.items.find((i) => i.OrderId === O && i.Size__c === size);
+  let r = await send({ line: 0, qty: 2, size: "M", reason: "Stained" }, "req-line0001");
+  ok(r.status === 200 && line("M").Misprint_Quantity__c === 2, "M Misprint Quantity 0 -> 2");
+  r = await send({ line: 0, qty: 3, size: "M", reason: "Ink smear" }, "req-line0002");
+  ok(line("M").Misprint_Quantity__c === 5, "adds on top: 2 + 3 = 5");
+  r = await send({ line: 0, qty: 1, size: "L", reason: "Hole / damaged" }, "req-line0003");
+  let d = await r.json();
+  ok(line("L").Damaged_Quantity__c === 1 && !line("L").Misprint_Quantity__c, "Hole / damaged -> Damaged Quantity");
+  ok(d.misprint.stored.field === "damaged", "answer says damaged");
+  ok(db.orders[0].TotalQtyMisprints__c === 6, "order total 2 + 3 + 1 = 6");
+  // no line number sent (an older tablet): found by garment name
+  r = await send({ qty: 1, size: "S", reason: "Burned" }, "req-line0004");
+  ok(r.status === 200 && line("S").Misprint_Quantity__c === 1, "found by garment name");
+  // the order list shows the counts, but not Salesforce's line ids
+  const l = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders[0];
+  const m = l.lines[0].sizes.find((x) => x.size === "M");
+  ok(m.misprinted === 5 && !("items" in m), "tablet sees misprinted 5 per size, no line ids");
+  // someone changed the line a moment ago -> re-read and add on top
+  db.orders[0].Misprint_Details__c = "";   // (four lines above filled the 255-character notes)
+  line("M").LastModifiedDate = new Date(Date.now() + 60000).toISOString(); line("M").Misprint_Quantity__c = 9;
+  const before = db.orders[0].TotalQtyMisprints__c;
+  r = await send({ line: 0, qty: 1, size: "M", reason: "Stained" }, "req-line0005");
+  ok(r.status === 409 || line("M").Misprint_Quantity__c === 10, "a line changed by someone else is never overwritten (" + line("M").Misprint_Quantity__c + ")");
+  ok(r.status !== 409 || db.orders[0].TotalQtyMisprints__c === before, "and if it gave up, the order wasn't changed either");
+  // activated order: the line can't change -> nothing saved at all
+  reset(); const env2 = ENV(); const c2 = await signIn(env2);
+  behave.itemLocked = true;
+  r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: O, line: 0, qty: 1, size: "M", garment: "Navy Gildan 5000 Tee", reason: "Stained", requestId: "req-line0006" }, c2), env: env2 });
+  d = await r.json();
+  ok(r.status === 422 && /activated/.test(d.message) && /Nothing was saved/.test(d.message), "activated order: Salesforce's reason shown, nothing saved");
+  ok(!db.orders[0].TotalQtyMisprints__c && db.orders[0].Misprint_Details__c === "TOTAL QTY: 00", "order total and notes rolled back");
+  // timeout -> 'not sure'
+  behave.itemLocked = false; behave.misTimeout = true;
+  r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: O, line: 0, qty: 1, size: "M", garment: "Navy Gildan 5000 Tee", reason: "Stained", requestId: "req-line0007" }, c2), env: env2 });
+  d = await r.json();
+  ok(r.status === 504 && d.error === "unconfirmed", "timeout -> not sure it saved");
 });
 
 await test("Misprint: validation rule message reaches the catcher", async () => {
@@ -561,6 +637,8 @@ await test("Add More: extras of a size not on the order", async () => {
   // a misprint on an extra size is accepted
   r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: O, qty: 1, size: "2XL", garment: "Navy Gildan 5000 Tee", reason: "Stained", requestId: "req-xtra0009" }, cookie), env });
   ok(r.status === 200, "misprint on an extra size (2XL) is accepted");
+  d = await r.json();
+  ok(d.misprint.stored === null && d.misprint.extra === true, "an extra size goes in the notes only (no order line)");
 });
 
 await test("Mixed box: two garments from the order in one box", async () => {

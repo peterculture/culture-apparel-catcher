@@ -6,7 +6,9 @@
 //
 // What it grants (and nothing else):
 //   Order            Read + View All. Edit ONLY TotalQtyMisprints__c, Misprint_Details__c and Packaging_Count__c.
-//   Order Product    Read Size__c and Color__c (Order Products follow the Order's access).
+//   Order Product    Read Size__c and Color__c. Edit ONLY Misprint_Quantity__c and Damaged_Quantity__c
+//                    (2026-10-27: a catcher's misprint is added to its size line, which the Production
+//                    Error flow's table shows). Order Products follow the Order's access (Edit on Order).
 //   Order Packaging  Read + Create + Edit + Delete + View All (Edit Box / Delete Box; the app allows
 //                    changes only within 7 days of a box being created).
 //   Account, Product, Price Book, the Printer's object   Read only.
@@ -78,6 +80,7 @@ Map<String, Boolean> fields = new Map<String, Boolean>{
     'Order.TotalQtyMisprints__c' => true, 'Order.Misprint_Details__c' => true,
     'Order.Packaging_Count__c' => true,
     'OrderItem.Size__c' => false, 'OrderItem.Color__c' => false,
+    'OrderItem.Misprint_Quantity__c' => true, 'OrderItem.Damaged_Quantity__c' => true,
     'Order_Packaging__c.Order__c' => true, 'Order_Packaging__c.Packaging_Type__c' => true,
     'Order_Packaging__c.Packaging_Quantity__c' => true, 'Order_Packaging__c.Quantity_Size_Counted__c' => true, 'Order_Packaging__c.CountedBy__c' => true
 };
