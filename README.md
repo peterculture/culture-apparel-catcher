@@ -210,6 +210,8 @@ but without those two protections.
    Copy its Consumer Key and Consumer Secret into Cloudflare.
 3. **Access the integration user needs:**
    - Order: Read, and Edit on `TotalQtyMisprints__c`, `Misprint_Details__c` and `Packaging_Count__c`.
+     Read on `Shipping_Delivery__c` (Delivery Method, for the badge; added 10-27). Until the script is run
+     with it, the app leaves the field out (no badge) and retries every 10 minutes.
      Read on the fields the list uses: `GOA_Order_Number__c`, `Order_Substatus__c`,
      `Printer__c`, `Print_Date__c`, `Specifications_for_Printing__c`, `Artwork_URL__c`.
    - Order Product (OrderItem): Read on `Size__c`, `Color__c`, Quantity, and the Product name;
@@ -227,3 +229,8 @@ node tools/test.mjs
 The tests run against a pretend Salesforce, with no network. They cover sign-in, the
 PIN brake, the order filter, box and misprint saves, duplicate taps, timeouts, two
 catchers at once, and validation-rule messages.
+
+## Delivery Method badge (10-27)
+Every order card and the order header show the order's **Delivery Method** (`Order.Shipping_Delivery__c`):
+PICKUP, FULFILLMENT (Order Fulfillment), SHIPPING, DELIVERY, SPLIT SHIP, or NO DELIVERY METHOD when it's blank.
+The label carries the meaning; each method also has its own color.

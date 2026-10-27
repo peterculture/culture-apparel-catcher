@@ -231,6 +231,16 @@ img[data-mock].ready + .mock-wait { display: none; }
 .card.moved[aria-pressed="true"] { border-color: var(--warn-soft); box-shadow: 0 0 0 2px var(--warn) inset; }
 .tag { align-self: flex-start; padding: .3rem .55rem; border-radius: .45rem; font: 600 .72rem/1 'Oswald'; letter-spacing: .1em; }
 .tag.moved { background: var(--warn); color: #1a1205; }
+/* Delivery Method badge: text says the method; color only helps tell them apart at a glance */
+.dm { align-self: flex-start; display: inline-block; padding: .26rem .5rem; border-radius: .4rem; border: 1px solid;
+  font: 600 .7rem/1 'Oswald'; letter-spacing: .12em; white-space: nowrap; }
+.dm.dm-big { font-size: .82rem; padding: .34rem .62rem; margin-top: .35rem; }
+.dm-pickup { background: #13202e; color: #A3CBF2; border-color: #3E6C9A; }
+.dm-fulfillment { background: #221a30; color: #CDB0F0; border-color: #6E5096; }
+.dm-shipping { background: #11231a; color: #95D3AC; border-color: var(--method-sp); }
+.dm-delivery { background: #0f2427; color: #8CD5DE; border-color: #2F8790; }
+.dm-split { background: #2b1424; color: #F0A8D2; border-color: #96497C; }
+.dm-none, .dm-other { background: var(--surface-input); color: var(--text-muted); border-color: var(--border-strong); }
 .tag.done { background: var(--ok-bg); color: var(--ok-text); border: 1px solid var(--ok-strong); }
 .moved-banner { display: flex; gap: .9rem; align-items: center; padding: 1rem 1.2rem; border-radius: 1rem; background: var(--warn-bg); border: 2px solid var(--warn); color: var(--warn-soft); font: 500 1.05rem/1.4 'Archivo'; }
 .moved-banner b { display: block; font: 700 1.15rem/1.2 'Oswald'; letter-spacing: .06em; color: #F2D29A; margin-bottom: .2rem; }

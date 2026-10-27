@@ -510,7 +510,7 @@
       return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" data-q="' + esc(searchKey(o)) + '" aria-pressed="' + (o.id === state.pastSelId) + '">' +
         '<span class="thumb">' + ICON.box + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
-        '<span class="card-cust">' + esc(o.customer) + "</span>" +
+        '<span class="card-cust">' + esc(o.customer) + "</span>" + deliveryBadge(o) +
         '<span class="card-meta">' + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + (o.lastBoxAt ? " · last box " + esc(fmtDate(o.lastBoxAt)) + " " + esc(fmtTime(o.lastBoxAt)) : "") + "</span>" + tag + "</span></button>";
     }).join("");
     var body;
@@ -546,7 +546,7 @@
       return '<button class="card' + (o.inProduction ? "" : " moved") + '" data-act="pick" data-id="' + esc(o.id) + '" data-q="' + esc(searchKey(o)) + '" aria-pressed="' + sel + '">' +
         '<span class="thumb">' + thumb + "</span>" +
         '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
-        '<span class="card-cust">' + esc(o.customer) + "</span>" +
+        '<span class="card-cust">' + esc(o.customer) + "</span>" + deliveryBadge(o) +
         progressHtml(o) + tag + "</span></button>";
     }).join("");
     var body;
@@ -602,7 +602,7 @@
     return '<main class="detail">' +
       '<button class="back narrow-only" data-act="back">' + ICON.back + "ALL ORDERS</button>" + banner +
       '<div class="d-top">' + mock + '<div class="d-id"><h2 class="d-num">' + esc(o.num) + "</h2>" +
-      '<div class="d-cust">' + esc(o.customer) + "</div>" +
+      '<div class="d-cust">' + esc(o.customer) + "</div>" + deliveryBadge(o, "dm-big") +
       '<div class="d-meta">Print date ' + esc(fmtDate(o.printDate)) + (o.specs ? " · " + esc(o.specs) : "") + "</div></div></div>" +
       '<div class="panel">' + (lines || '<div class="hint">No garment sizes on this order in Salesforce.</div>') + "</div>" +
       '<div class="stats"><div class="stat"><div class="l">BOXES</div><div class="v">' + o.boxes.length + "</div></div>" +
@@ -647,7 +647,7 @@
       (open ? open + (open === 1 ? " box" : " boxes") + " can still be edited or deleted. Each box can be changed for 7 days after it was saved."
             : "Every box on this order is past its 7-day review period, so it's read-only.") + "</div>" +
       '<div class="d-top"><div class="d-id"><h2 class="d-num">' + esc(o.num) + "</h2>" +
-      '<div class="d-cust">' + esc(o.customer) + "</div>" +
+      '<div class="d-cust">' + esc(o.customer) + "</div>" + deliveryBadge(o, "dm-big") +
       '<div class="d-meta">Print date ' + esc(fmtDate(o.printDate)) + " · " + esc(where) + (o.finished ? " · Packaging Count " + o.finishedCount : "") + "</div></div></div>" +
       '<div class="stats"><div class="stat"><div class="l">BOXES</div><div class="v">' + o.boxes.length + "</div></div>" +
       '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + (split.extra ? " · +" + split.extra + " extra" : "") + "</small></div></div>" +
@@ -657,6 +657,14 @@
   }
 
   /** Fulfillment order: finished with a box count of 0 and no boxes logged (10-21). */
+  /** Delivery Method badge (Salesforce Order "Delivery Method"). Nothing when Salesforce didn't send it. */
+  function deliveryBadge(o, cls) {
+    var d = o && o.delivery;
+    if (!d || !d.label) return "";
+    var key = /^[a-z]+$/.test(d.key) ? d.key : "other";
+    return '<span class="dm dm-' + key + (cls ? " " + cls : "") + '" title="Delivery method">' + esc(d.label) + "</span>";
+  }
+
   function isFulfillment(o) { return !!o.finished && Number(o.finishedCount) === 0 && !o.boxes.length; }
 
   function finishBtn(o) {
