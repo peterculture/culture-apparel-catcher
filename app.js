@@ -587,7 +587,10 @@
     var lines = o.lines.map(function (l) {
       return '<div><div class="line-head"><span>' + esc(l.product) + (l.color ? " · " + esc(l.color) : "") + '</span><span class="tot">' + l.total + "</span></div>" +
         '<div class="sizes">' + l.sizes.map(function (s) {
-          return '<div class="size"><div class="s">' + esc(s.size) + '</div><div class="q">' + s.qty + "</div></div>";
+          // Misprinted / damaged so far on this size (stored on the order line; the Production Error screen starts from it).
+          var bad = (s.misprinted || 0) + (s.damaged || 0);
+          return '<div class="size"><div class="s">' + esc(s.size) + '</div><div class="q">' + s.qty + "</div>" +
+            (bad ? '<div class="mp" title="' + (s.misprinted || 0) + " misprinted, " + (s.damaged || 0) + ' damaged">' + bad + " BAD</div>" : "") + "</div>";
         }).join("") + (l.extras || []).map(function (e) {
           return '<div class="size extra" title="Extra: not on the order"><div class="s">' + esc(e.size) + ' · EXTRA</div><div class="q">+' + e.boxed + "</div></div>";
         }).join("") + "</div></div>";
@@ -1063,7 +1066,10 @@
         } else if (kind === "mis" && o && r.data.misprint) {
           o.misprintTotal = r.data.misprintTotal;
           var mp = r.data.misprint;
-          showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + ". The print shop has been notified." });
+          // Where it went on the order's lines: that's what the Production Error screen shows (10-27).
+          var where = mp.stored ? " Added to the " + mp.size + " line as " + mp.stored.field + " for the Production Error check."
+            : mp.extra ? " " + mp.size + " is an extra size (not on the order), so it's in the notes only." : "";
+          showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + "." + where + " The print shop has been notified." });
         }
         state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null; state.del = null;
         if (kind === "box" && opts.andNew && o) {
@@ -1107,7 +1113,7 @@
     var o = current(), m = state.mis; if (!o || !m || !m.size || !m.reason) return;
     var line = o.lines[m.line] || {};
     var garment = ((line.color ? line.color + " " : "") + (line.product || "")).trim().slice(0, 40);
-    send("mis", { orderId: o.id, qty: m.qty, size: m.size, garment: garment, reason: m.reason, note: (m.note || "").trim(), requestId: m.requestId });
+    send("mis", { orderId: o.id, line: m.line, qty: m.qty, size: m.size, garment: garment, reason: m.reason, note: (m.note || "").trim(), requestId: m.requestId });
   }
 
   /* ------------------------------------------------------------- PIN ----- */

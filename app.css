@@ -379,3 +379,6 @@ html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-conten
 .add-other .note-in { flex: 1; min-width: 9rem; text-transform: uppercase; }
 .size.extra { border: 1px dashed var(--warn); background: var(--warn-bg); }
 .size.extra .s { color: var(--warn-soft); }
+
+/* ---- misprints per size on the order panel (2026-10-27) ---- */
+.size .mp { margin-top: .3rem; font: 600 .7rem/1 'Oswald'; letter-spacing: .08em; color: var(--warn-soft); }

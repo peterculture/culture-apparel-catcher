@@ -94,10 +94,17 @@ Pages project, its own Salesforce connection and its own PIN list.
   "MOVED ON · FINISH COUNT" and listed first, until a catcher taps **FINISH CATCHING**.
   That writes the number of boxes to `Order.Packaging_Count__c` and the order leaves the
   board. (The board remembers which orders it has shown in KV, key `board:seen`, for 14 days.)
-- **Report Misprint:** on the Order it adds to `TotalQtyMisprints__c` and adds one line to
-  `Misprint_Details__c` under the "TOTAL QTY: NN" heading. The heading keeps the
-  Total Quantity Misprints formula and the misprint-rate reports correct. Changing
-  Misprint Details runs the "Printshop Misprint Process" flow, which notifies the print shop.
+- **Report Misprint (changed 10-27):** one all-or-nothing Salesforce request (`/composite`, allOrNone):
+  - on the Order, adds to `TotalQtyMisprints__c` and adds one line to `Misprint_Details__c`
+    (no "TOTAL QTY: NN" heading any more; an old heading is dropped the next time a line is added);
+  - on the matching **size line** of that garment (OrderItem), adds the count to `Misprint_Quantity__c`,
+    or to `Damaged_Quantity__c` when the reason is "Hole / damaged".
+  The **Production Error** button runs the flow "SCREEN Order Reprint Process2", whose first screen is a
+  table of the order's lines with "# Misprinted" and "# Damaged" columns -- exactly these fields -- so the
+  press operator starts from the catcher's counts. An extra size (Add More) has no line: notes only.
+  Order lines can't be changed once Salesforce activates the order (around Sent Tracking); then nothing
+  is saved and Salesforce's reason is shown. The order panel shows "N BAD" under each size.
+  Changing Misprint Details runs the "Printshop Misprint Process" flow, which notifies the print shop.
 - Tap the mockup to open it full screen: pinch, double-tap or +/– to zoom, drag to move.
 - – / + in the header makes the whole screen smaller or bigger (85%–175%). At larger
   sizes the screen switches to one column.
@@ -132,8 +139,8 @@ loaded. The animation is off for tablets set to reduce motion.
 - Every save carries a one-time ID, so a double tap or a retry can't create two boxes.
 - A save that times out is shown as **"not sure it saved"**, and the order is reloaded.
   It is never shown as saved, and never as failed.
-- A misprint is written "only if nobody changed the order since it was read". If someone
-  did, the app re-reads and adds on top, so two catchers can't overwrite each other.
+- A misprint is written "only if nobody changed the order (and its size line) since they were read".
+  If someone did, the app re-reads and adds on top, so two catchers can't overwrite each other.
 - Every save first re-checks that the order is still In Production for screen print.
 - Salesforce's own error message (for example a validation rule) is shown to the catcher.
 - A failed Salesforce read is shown as an error, never as an empty list.
@@ -205,7 +212,8 @@ but without those two protections.
    - Order: Read, and Edit on `TotalQtyMisprints__c`, `Misprint_Details__c` and `Packaging_Count__c`.
      Read on the fields the list uses: `GOA_Order_Number__c`, `Order_Substatus__c`,
      `Printer__c`, `Print_Date__c`, `Specifications_for_Printing__c`, `Artwork_URL__c`.
-   - Order Product (OrderItem): Read on `Size__c`, `Color__c`, Quantity, and the Product name.
+   - Order Product (OrderItem): Read on `Size__c`, `Color__c`, Quantity, and the Product name;
+     Edit on `Misprint_Quantity__c` and `Damaged_Quantity__c` (added 10-27; run `tools/catcher-app-access.apex` again).
    - Order Packaging (`Order_Packaging__c`): Read + Create + Edit + Delete, with Edit on Name,
      `Order__c`, `Packaging_Type__c`, `Packaging_Quantity__c` and `Quantity_Size_Counted__c`.
    - Mockups come from `Order.Artwork_URL__c`, a public file link, so no file access is needed.
