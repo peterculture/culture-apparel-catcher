@@ -131,7 +131,7 @@ export async function loadReviewOrder(env, orderId) {
 async function buildOrders(env, orders) {
   const ids = orders.map((o) => soqlQuote(o.Id)).join(",");
   const [items, boxes] = await Promise.all([
-    runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name FROM OrderItem WHERE OrderId IN (${ids})`),
+    runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name, Misprint_Quantity__c, Damaged_Quantity__c, LastModifiedDate FROM OrderItem WHERE OrderId IN (${ids}) ORDER BY CreatedDate ASC`),
     runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, ${COUNTED_BY_FIELD}, CreatedDate, LastModifiedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
   ]);
 
@@ -148,11 +148,18 @@ async function buildOrders(env, orders) {
       if (!groups.has(key)) groups.set(key, { product, color, sizes: new Map() });
       const g = groups.get(key);
       const size = String(it.Size__c).trim();
-      g.sizes.set(size, (g.sizes.get(size) || 0) + (Number(it.Quantity) || 0));
+      if (!g.sizes.has(size)) g.sizes.set(size, { qty: 0, items: [] });
+      const cell = g.sizes.get(size);
+      cell.qty += Number(it.Quantity) || 0;
+      // The Salesforce line(s) behind this size. A misprint is added to the first one's
+      // Misprint/Damaged Quantity, which the Production Error flow's table shows (2026-10-27).
+      cell.items.push({ id: it.Id, lm: it.LastModifiedDate || null,
+        mis: Number(it.Misprint_Quantity__c) || 0, dmg: Number(it.Damaged_Quantity__c) || 0 });
     }
     const lines = [...groups.values()].map((g) => {
       const sizes = [...g.sizes.entries()].sort((a, b) => sizeRank(a[0]) - sizeRank(b[0]))
-        .map(([size, qty]) => ({ size, qty, boxed: 0 }));
+        .map(([size, c]) => ({ size, qty: c.qty, boxed: 0,
+          misprinted: c.items.reduce((a, x) => a + x.mis, 0), damaged: c.items.reduce((a, x) => a + x.dmg, 0), items: c.items }));
       // extras: sizes NOT on the order that have been boxed anyway ("Add More"), e.g. [{ size: "2XL", boxed: 3 }]
       return { product: g.product, color: g.color, sizes, extras: [], total: sizes.reduce((a, s) => a + s.qty, 0) };
     });
@@ -206,6 +213,12 @@ async function buildOrders(env, orders) {
       boxes: orderBoxes,
     };
   });
+}
+
+/** The tablet doesn't need Salesforce's line ids: take them out of an order before sending it. */
+export function stripItems(order) {
+  for (const l of order.lines || []) for (const s of l.sizes) delete s.items;
+  return order;
 }
 
 /** One order, or an error a catcher can understand. Used before every save. */

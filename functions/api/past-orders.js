@@ -7,6 +7,7 @@
  * (creation + 7 days) and whether it can still be changed -- worked out on this
  * server's clock. Read-only.
  */
+import { stripItems } from "./_orders.js";
 import { json, errorResponse, runQuery, soqlQuote } from "./_sf.js";
 import { requireUser } from "./_session.js";
 import { loadReviewOrders, printerNames } from "./_orders.js";
@@ -29,6 +30,7 @@ export async function onRequestGet({ request, env }) {
     orders.sort((a, b) => String(latest.get(b.id)).localeCompare(String(latest.get(a.id))));
     const out = orders.map((o) => {
       const { misprintDetails, artworkUrl, ...rest } = o;
+      stripItems(rest);
       return Object.assign(rest, { lastBoxAt: latest.get(o.id) || null, hasMockup: false });
     });
     return json({ orders: out, days: PAST_DAYS, at: new Date().toISOString() });
