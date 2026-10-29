@@ -22,15 +22,27 @@
  *  - reads time out; a write that times out is reported as UNCONFIRMED,
  *    never as saved and never as failed, because Salesforce may still have
  *    done it.
+ *
+ * Refresh and loading rules copied from The Forge (handoff 2026-10-29):
+ *  - NEVER share an in-flight promise between requests. Only FINISHED data is
+ *    shared (a finished token, a finished describe); each request makes its own
+ *    call. The Forge once shared a sign-in promise: a cancelled tablet request
+ *    left it hanging and every screen stalled within minutes.
+ *  - Salesforce reads give up after 30 s; a sign-in try after 8 s, with one
+ *    quick retry.
+ *  - Errors name the kind of failure, so the tablet can say "come back later"
+ *    or "this was never set up": 409 org_not_configured (the missing object or
+ *    field), sf_auth_failed (Salesforce refused the sign-in), query_failed with
+ *    Salesforce's own sentence.
  */
 
 const TOKEN_TTL_MS = 90 * 60 * 1000;
-const READ_TIMEOUT_MS = 20000;
+const READ_TIMEOUT_MS = 30000;
 const WRITE_TIMEOUT_MS = 25000;
-const LOGIN_TIMEOUT_MS = 15000;
+const LOGIN_TIMEOUT_MS = 8000;
+const LOGIN_RETRY_PAUSE_MS = 400;
 
-let cachedToken = null;   // { token, instanceUrl, exp }
-let inFlightLogin = null; // one login at a time per isolate
+let cachedToken = null;   // { token, instanceUrl, exp } -- a FINISHED sign-in, safe to share
 
 export class SfError extends Error {
   /** code: short machine word; status: HTTP status to send the browser;
@@ -51,22 +63,27 @@ export function apiVersion(env) {
 async function login(env) {
   const { SF_LOGIN_URL, SF_CLIENT_ID, SF_CLIENT_SECRET } = env;
   if (!SF_LOGIN_URL || !SF_CLIENT_ID || !SF_CLIENT_SECRET) {
-    throw new SfError("sf_not_configured", 500, "The app is not connected to Salesforce yet.");
+    throw new SfError("org_not_configured", 409, "The app is not connected to Salesforce yet. Tell a manager.", "secrets");
   }
+  const tryOnce = () => fetch(`${String(SF_LOGIN_URL).replace(/\/+$/, "")}/services/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: SF_CLIENT_ID,
+      client_secret: SF_CLIENT_SECRET,
+    }),
+    signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
+  });
   let resp;
   try {
-    resp = await fetch(`${String(SF_LOGIN_URL).replace(/\/+$/, "")}/services/oauth2/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: SF_CLIENT_ID,
-        client_secret: SF_CLIENT_SECRET,
-      }),
-      signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
-    });
+    resp = await tryOnce();
   } catch (err) {
-    throw new SfError("sf_unreachable", 504, "Salesforce did not answer. Check the internet connection and try again.");
+    // No answer in 8 s: one quick retry. (A refusal is an answer, and is never retried.)
+    await new Promise((r) => setTimeout(r, LOGIN_RETRY_PAUSE_MS));
+    try { resp = await tryOnce(); } catch (err2) {
+      throw new SfError("sf_unreachable", 504, "Salesforce did not answer. Check the internet connection and try again.");
+    }
   }
   if (!resp.ok) {
     console.error("Salesforce login failed", resp.status);
@@ -79,19 +96,21 @@ async function login(env) {
   return { token: data.access_token, instanceUrl: data.instance_url, exp: Date.now() + TOKEN_TTL_MS };
 }
 
+/** A finished token is shared; a sign-in in progress never is -- each request signs in itself. */
 export async function getToken(env, { force = false } = {}) {
   if (!force && cachedToken && cachedToken.exp - Date.now() > 60000) return cachedToken;
-  if (!inFlightLogin) {
-    inFlightLogin = login(env)
-      .then((t) => (cachedToken = t))
-      .catch((err) => { cachedToken = null; throw err; })
-      .finally(() => { inFlightLogin = null; });
+  try {
+    const t = await login(env);
+    cachedToken = t;
+    return t;
+  } catch (err) {
+    if (force) cachedToken = null;
+    throw err;
   }
-  return inFlightLogin;
 }
 
 /** Test hook: forget the cached token. */
-export function _resetTokenCache() { cachedToken = null; inFlightLogin = null; }
+export function _resetTokenCache() { cachedToken = null; }
 
 /** Turn a Salesforce error body into one readable sentence. */
 export function sfMessage(data) {
@@ -139,9 +158,15 @@ export async function runQuery(env, soql) {
     const resp = await sfFetch(env, path);
     const data = await resp.json().catch(() => null);
     if (!resp.ok) {
-      console.error("SOQL failed", resp.status, sfErrorCode(data), sfMessage(data));
-      throw new SfError("query_failed", resp.status === 401 ? 502 : 502,
-        "Could not read orders from Salesforce. Try again in a moment.", sfErrorCode(data));
+      const code = sfErrorCode(data), msg = sfMessage(data);
+      console.error("SOQL failed", resp.status, code, msg);
+      if (code === "INVALID_FIELD" || code === "INVALID_TYPE") {
+        // Salesforce is missing (or hiding from the app's login) something this screen reads.
+        throw new SfError("org_not_configured", 409,
+          "Salesforce is missing something this screen reads" + (msg ? `: "${msg}"` : ".") + " Tell a manager.", code);
+      }
+      throw new SfError("query_failed", 502,
+        "Could not read from Salesforce" + (msg ? `: "${msg}"` : ".") + " Try again in a moment.", code);
     }
     if (!data || !Array.isArray(data.records)) {
       throw new SfError("query_failed", 502, "Salesforce sent back something unexpected. Try again in a moment.");
@@ -171,7 +196,7 @@ export function _resetDescribeCache() { describeCache.clear(); }
 export async function picklistValues(env, object, field) {
   const d = await describe(env, object);
   const f = d.fields.find((x) => x.name === field);
-  if (!f) throw new SfError("field_missing", 500, `Salesforce field ${object}.${field} is missing or hidden from the app user.`);
+  if (!f) throw new SfError("org_not_configured", 409, `Salesforce field ${object}.${field} is missing or hidden from the app user. Tell a manager.`, "field_missing");
   return (f.picklistValues || []).filter((p) => p.active).map((p) => ({ value: p.value, label: p.label || p.value, isDefault: !!p.defaultValue }));
 }
 

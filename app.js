@@ -8,15 +8,20 @@
   "use strict";
 
   var ZOOMS = [0.85, 1, 1.15, 1.3, 1.5, 1.75];
-  var POLL_MS = 30000;
+  /* Refresh and loading rules: copied from The Forge (handoff 2026-10-29). */
+  var POLL_MS = { board: 15000, past: 30000 };   // In Production board: a main board (15 s). Past Orders: a side list (30 s).
+  var ERROR_RETRY_EVERY = 5;                     // after a failed load, ask again only every 5th tick
+  var CONFIG_ERRORS = ["org_not_configured", "sf_auth_failed"];   // retrying can't fix these: no Try Again button
 
   var state = {
     user: null,            // { name }
     reasons: [],
     boxTypes: [],
     orders: [],
-    loaded: false,
-    loadError: "",
+    // Each list holds exactly ONE connection state, and that state alone decides what it shows,
+    // whether it refreshes and whether it may save: loading -> live / stale / error.
+    // (The Forge's "demo" state isn't used: The Catch has no sample data.)
+    scr: { board: freshScreen(), past: freshScreen() },
     selId: null,
     view: "list",          // narrow screens show list OR detail
     zoom: readZoom(),
@@ -29,7 +34,7 @@
     pin: "",
     mode: "board",         // "board" (In Production) | "past" (Past Orders)
     q: "",                 // order search (number or customer); cleared when switching lists or signing out
-    past: [], pastLoaded: false, pastError: "", pastSelId: null,
+    past: [], pastSelId: null,
     del: null,             // { boxId, requestId } while the Delete Box dialog is open
     logoutPending: null,   // a logout waiting for a save that's already on its way to Salesforce
     draft: null,           // an unsaved form kept for the SAME catcher after an automatic sign-out
@@ -120,12 +125,124 @@
     shirt: '<svg width="70%" height="70%" viewBox="0 0 48 48" aria-hidden="true"><path d="M17 8 L9 12 L5 20 L10 23 L13 19 L13 41 L35 41 L35 19 L38 23 L43 20 L39 12 L31 8 Q24 13 17 8 Z" fill="#2a2a30" stroke="#4a4a52" stroke-width="1.2"/></svg>'
   };
 
+  /* ------------------------------------------------ connection states -- */
+  function freshScreen() { return { s: "loading", at: 0, misses: 0, ticks: 0, err: "", config: false }; }
+  /** The list on screen now: state.scr.board or state.scr.past. */
+  function scrNow() { return state.scr[state.mode === "past" ? "past" : "board"]; }
+  /** May this list refresh on this tick? live/stale: yes. error: every 5th tick. loading: no. */
+  function shouldPoll(sc) {
+    if (sc.s === "live" || sc.s === "stale") return true;
+    if (sc.s !== "error") return false;
+    sc.ticks = (sc.ticks || 0) + 1;
+    return sc.ticks % ERROR_RETRY_EVERY === 0;
+  }
+  function isConfigError(data) { return !!(data && CONFIG_ERRORS.indexOf(data.error) >= 0); }
+  /** true = ignore this ONE failure (the list stays as it is, still live). The second in a row counts. */
+  function missOnce(sc, wasLive, data) {
+    sc.misses = (sc.misses || 0) + 1;
+    return wasLive && !isConfigError(data) && sc.misses < 2;
+  }
+  /** A good load: back to live, failure counter cleared, "N m old" counts from now. */
+  function loadOk(sc) { sc.misses = 0; sc.ticks = 0; sc.s = "live"; sc.at = Date.now(); sc.err = ""; sc.config = false; }
+  /** A failure that counts: stale when real rows are on screen (and retrying can help), else error. */
+  function loadFailed(sc, data) {
+    var hadRows = sc.s === "live" || sc.s === "stale";
+    sc.err = (data && data.message) || "Salesforce didn't answer.";
+    sc.config = isConfigError(data);
+    sc.s = hadRows && !sc.config ? "stale" : "error";
+  }
+  function minutesOld(sc) { return Math.max(1, Math.ceil((Date.now() - sc.at) / 60000)); }
+
+  /* -------------------------------------------- loading indicators ----- */
+  // Two indicators, both hooked into the ONE place every request passes through
+  // (trackRequest, used by api() and the mockup fetch), so no screen can be forgotten.
+  //  1. Big centre loader -- opt-in, only for signing in and a list's first load
+  //     (Past Orders the first time it's opened). Paints after 320 ms, gone after 15 s at most.
+  //  2. Small corner icon -- every request, at once; stays at least 500 ms; a request
+  //     older than 15 s turns it amber, "STILL CONNECTING…". It never blocks a tap.
+  var LOADER_DELAY_MS = 320, LOADER_MAX_MS = 15000;
+  var fgDepth = 0, fgInFlight = 0, showT = null, maxT = null;
+  function loaderEl() { return document.getElementById("app-loader"); }
+  function overlay(on) {
+    try {
+      var el = loaderEl();
+      if (on && !el) {
+        el = document.createElement("div");
+        el.id = "app-loader"; el.setAttribute("role", "status"); el.setAttribute("aria-live", "polite");
+        el.innerHTML = '<div class="ld-box"><img class="ld-mark" src="/brand/catch-mark.png" alt="" width="124" height="96"><span class="ld-t">LOADING</span></div>';
+        document.body.appendChild(el);
+      } else if (!on && el) el.parentNode.removeChild(el);
+    } catch (e) {}
+  }
+  function clearOverlayTimers() { clearTimeout(showT); clearTimeout(maxT); showT = maxT = null; }
+  /** Requests started synchronously inside fn() get the big loader; anything after a .then stays silent. */
+  function foregroundLoad(fn) { fgDepth++; try { return fn(); } finally { fgDepth--; } }
+  function hideLoader() { fgInFlight = 0; clearOverlayTimers(); overlay(false); }
+  function loaderTimeout() { console.warn("[catch] big loader hidden after 15 s; a request is still waiting"); overlay(false); }
+  window.addEventListener("pageshow", function (e) { if (e.persisted) hideLoader(); });   // back button ONLY (pageshow also fires on every normal load)
+
+  var BUSY_MIN_MS = 500, BUSY_SLOW_MS = 15000;
+  var busySeq = 0, busyN = 0, busyShownAt = 0, busyHideT = null, busyTick = null, busyReqs = {};
+  function badge(on) {
+    var el = document.getElementById("app-busy");
+    if (on && !el) {
+      el = document.createElement("div");
+      el.id = "app-busy"; el.setAttribute("role", "status");
+      var hdr = document.querySelector("header");
+      el.style.top = (hdr ? Math.round(hdr.getBoundingClientRect().bottom) + 8 : 12) + "px";
+      el.innerHTML = '<span class="busy-ring"><img src="/brand/catch-mark.png" alt=""></span><span class="busy-t">LOADING</span>';
+      document.body.appendChild(el);
+      busyShownAt = Date.now();
+      busyTick = setInterval(function () {
+        try {
+          var now = Date.now(), slow = Object.keys(busyReqs).some(function (k) { return now - busyReqs[k] >= BUSY_SLOW_MS; });
+          el.classList.toggle("slow", slow);
+          el.querySelector(".busy-t").textContent = slow ? "STILL CONNECTING…" : "LOADING";
+        } catch (e) {}
+      }, 1000);
+    } else if (!on && el) { el.parentNode.removeChild(el); clearInterval(busyTick); busyTick = null; }
+  }
+  function busyBegin() {
+    var id = ++busySeq;
+    try { busyReqs[id] = Date.now(); busyN++; clearTimeout(busyHideT); busyHideT = null; badge(true); } catch (e) {}
+    return id;
+  }
+  function busyEnd(id) {
+    try {
+      if (!(id in busyReqs)) return;
+      delete busyReqs[id]; busyN = Math.max(0, busyN - 1);
+      if (busyN) return;
+      var wait = BUSY_MIN_MS - (Date.now() - busyShownAt);
+      if (wait > 0) busyHideT = setTimeout(function () { if (!busyN) badge(false); }, wait); else badge(false);
+    } catch (e) {}
+  }
+  /** The one hook every request goes through. */
+  function trackRequest(promise) {
+    var fg = fgDepth > 0;
+    if (fg && ++fgInFlight === 1 && !showT && !loaderEl()) {
+      showT = setTimeout(function () {
+        showT = null; overlay(true);
+        maxT = setTimeout(loaderTimeout, LOADER_MAX_MS);
+      }, LOADER_DELAY_MS);
+    }
+    var ticket = busyBegin();
+    var done = function () {
+      busyEnd(ticket);
+      // The hide waits one moment, so a sign-in followed straight away by the order list
+      // reads as ONE loader instead of two flashes.
+      if (fg && --fgInFlight <= 0) setTimeout(function () { if (fgInFlight <= 0) hideLoader(); }, 0);
+    };
+    return promise.then(function (v) { done(); return v; }, function (e) { done(); throw e; });
+  }
+
   /* ---------------------------------------------------------------- api -- */
   function api(method, path, body) {
     var write = method !== "GET";
     var ctrl = window.AbortController ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, write ? 35000 : 20000) : null;
-    return fetch(path, {
+    // Longer than the server's own limits (Salesforce reads 30 s, sign-in 8 s + one retry), so the
+    // server's answer -- with Salesforce's own words -- arrives before the tablet gives up.
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, write ? 45000 : 45000) : null;
+    return trackRequest(fetch(path, {
       method: method,
       credentials: "same-origin",
       headers: body ? { "Content-Type": "application/json" } : {},
@@ -144,13 +261,15 @@
       return { ok: false, status: 0, data: { error: write ? "unconfirmed" : "offline",
         message: write ? "The connection dropped before Salesforce answered, so we can't tell if this saved. Check the order before trying again."
                        : "No connection. Check the tablet's Wi-Fi." } };
-    });
+    }));
   }
 
-  function setConn(kind) {
+  /** Header dot + words, from the connection state of the list on screen. */
+  function paintConn() {
     var dot = document.getElementById("conn-dot"), label = document.getElementById("conn-label");
-    dot.className = kind === "live" ? "live" : kind === "down" ? "down" : "";
-    label.textContent = kind === "live" ? "Live" : kind === "down" ? "Not connected" : "Connecting";
+    var sc = state.user ? scrNow() : null, k = sc ? sc.s : "loading";
+    dot.className = k === "live" ? "live" : (k === "stale" || k === "error") ? "down" : "";
+    label.textContent = k === "live" ? "Live · Salesforce" : k === "stale" ? "Offline · " + minutesOld(sc) + " m old" : k === "error" ? "Not connected" : "Connecting";
   }
 
   /* ------------------------------------------------------------ sign-in -- */
@@ -185,15 +304,16 @@
     }
     api("POST", "/api/logout");
     state.user = null; state.logoutPending = null; state.q = "";
-    state.orders = []; state.loaded = false; state.loadError = ""; state.selId = null;
-    state.past = []; state.pastLoaded = false; state.pastError = ""; state.pastSelId = null;
+    state.orders = []; state.selId = null; state.past = []; state.pastSelId = null;
+    state.scr = { board: freshScreen(), past: freshScreen() };
     state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null;
     state.pending = null; state.saving = false; state.pin = ""; state.pinErr = ""; state.mode = "board"; state.view = "list";
     clearTimeout(toastTimer); state.toast = null;
     state.signoutMsg = reason === "expired" ? "Your sign-in ended." : "";
     if (state.draft) state.signoutMsg += " " + state.draft.user + "'s unsaved entries on " + state.draft.num + " are kept and reopen when " + firstName(state.draft.user) + " signs in again.";
     $overlay.removeAttribute("data-shown");
-    renderAll(); setConn("");
+    hideLoader();
+    renderAll(); paintConn();
   }
 
   /** After sign-in: give a catcher back the form they hadn't saved -- only if it's the same catcher. */
@@ -216,45 +336,39 @@
   }
 
   /* --------------------------------------------------------------- load -- */
-  function loadOrders(quiet) {
+  /* One load function per list. The first load runs inside foregroundLoad() (big loader);
+     the timer's refreshes are plain calls (corner icon only). A failure goes through
+     missOnce(): the first one on a live list changes nothing; the second shows Offline. */
+  function loadList(key) {
     if (!state.user) return Promise.resolve();
-    if (!quiet) setConn("");
-    return api("GET", "/api/orders").then(function (r) {
-      if (!state.user) return;
+    var sc = state.scr[key], wasLive = sc.s === "live";
+    return api("GET", key === "past" ? "/api/past-orders" : "/api/orders").then(function (r) {
+      if (!state.user || r.status === 401) return;
       if (r.ok && Array.isArray(r.data.orders)) {
-        state.orders = r.data.orders;
-        state.loaded = true;
-        state.loadError = "";
-        if (!findIn(state.orders, state.selId)) state.selId = state.orders.length ? state.orders[0].id : null;
-        dropOldMocks();
-        setConn("live");
+        if (key === "past") {
+          state.past = r.data.orders;
+          if (!findIn(state.past, state.pastSelId)) state.pastSelId = state.past.length ? state.past[0].id : null;
+        } else {
+          state.orders = r.data.orders;
+          if (!findIn(state.orders, state.selId)) state.selId = state.orders.length ? state.orders[0].id : null;
+          dropOldMocks();
+        }
+        loadOk(sc);
       } else {
-        // Keep showing what we had; say plainly that it may be out of date.
-        state.loadError = (r.data && r.data.message) || "Could not load orders.";
-        setConn("down");
+        if (missOnce(sc, wasLive, r.data)) {
+          console.warn("[catch] one refresh of " + key + " failed; keeping what's on screen", r.status, r.data && r.data.error);
+          return;
+        }
+        loadFailed(sc, r.data);
       }
-      if (!state.sheet) renderMain();
+      paintConn();
+      if (!state.sheet && (key === "past") === (state.mode === "past")) renderMain();
     });
   }
-
+  function loadOrders() { return loadList("board"); }
   /** Past Orders: boxed orders from the last 30 days, read fresh from Salesforce. */
-  function loadPast(quiet) {
-    if (!state.user) return Promise.resolve();
-    if (!quiet) setConn("");
-    return api("GET", "/api/past-orders").then(function (r) {
-      if (!state.user) return;
-      if (r.ok && Array.isArray(r.data.orders)) {
-        state.past = r.data.orders; state.pastLoaded = true; state.pastError = "";
-        if (!findIn(state.past, state.pastSelId)) state.pastSelId = state.past.length ? state.past[0].id : null;
-        setConn("live");
-      } else {
-        state.pastError = (r.data && r.data.message) || "Could not load past orders.";
-        setConn("down");
-      }
-      if (!state.sheet && state.mode === "past") renderMain();
-    });
-  }
-  function reloadAll() { loadOrders(true); loadPast(true); }
+  function loadPast() { return loadList("past"); }
+  function reloadAll() { loadOrders(); loadPast(); }
 
   /* ------------------------------------------------------ keep awake ---- */
   // While a catcher is signed in, ask the browser to keep the screen on so the tablet
@@ -320,14 +434,23 @@
     var a = document.activeElement;
     if (a && a.id === "order-search") { renderPending = true; return; }
     renderPending = false;
+    // A refresh redraws the screen; keep where the catcher had scrolled to (the card list,
+    // and the order panel when it's still the same order), so nothing jumps back to the top.
+    var o = current(), sig = state.mode + ":" + (o ? o.id : "");
+    var cards = $app.querySelector(".cards"), det = $app.querySelector(".detail");
+    var keepCards = cards && lastMainMode === state.mode ? cards.scrollTop : 0;
+    var keepDet = det && lastMainSig === sig ? det.scrollTop : 0;
     $app.innerHTML = listHtml() + detailHtml();
+    lastMainMode = state.mode; lastMainSig = sig;
+    if (keepCards && (cards = $app.querySelector(".cards"))) cards.scrollTop = keepCards;
+    if (keepDet && (det = $app.querySelector(".detail"))) det.scrollTop = keepDet;
     applySearch();
     wireImages();
     applyZoom();
   }
 
   /* ------------------------------------------------------------ search --- */
-  var renderPending = false;
+  var renderPending = false, lastMainMode = "", lastMainSig = "";
   function searchKey(o) {
     var num = String(o.num || "");
     return (num + " " + num.replace(/[^a-z0-9]/gi, "") + " " + (o.customer || "")).toLowerCase();
@@ -414,16 +537,19 @@
   /** key = "orderId:n" (n = which picture, 0 = newest). */
   function fetchMock(key) {
     var parts = key.split(":");
-    return fetch("/api/mockup?orderId=" + encodeURIComponent(parts[0]) + "&n=" + (parseInt(parts[1], 10) || 0), { credentials: "same-origin" }).then(function (resp) {
+    // The download goes through trackRequest() like every other request (corner icon);
+    // drawing a PDF afterwards is the tablet's own work, so it's outside it.
+    return trackRequest(fetch("/api/mockup?orderId=" + encodeURIComponent(parts[0]) + "&n=" + (parseInt(parts[1], 10) || 0), { credentials: "same-origin" }).then(function (resp) {
       if (resp.status === 401) { signedOut(); return null; }
       if (resp.status === 404) return null;
       if (!resp.ok) throw new Error("mockup " + resp.status);
       var type = (resp.headers.get("Content-Type") || "").split(";")[0].trim();
-      return resp.arrayBuffer().then(function (buf) {
-        if (/^image\//.test(type)) return new Blob([buf], { type: type });
-        if (type === "application/pdf") return pdfToPicture(buf);
-        throw new Error("mockup type " + type);
-      });
+      return resp.arrayBuffer().then(function (buf) { return { type: type, buf: buf }; });
+    })).then(function (got) {
+      if (!got) return null;
+      if (/^image\//.test(got.type)) return new Blob([got.buf], { type: got.type });
+      if (got.type === "application/pdf") return pdfToPicture(got.buf);
+      throw new Error("mockup type " + got.type);
     });
   }
 
@@ -498,9 +624,24 @@
       '<div class="pin-pad">' + keys + "</div></div></div>";
   }
 
+  /** Rows on screen? Only a live or stale list shows its rows and counts (never while loading or after an error). */
+  function showsRows(sc) { return sc.s === "live" || sc.s === "stale"; }
+  /** A failed load: nothing about the work, just the reason. Try Again only when retrying can help. */
+  function errorBody(sc, title) {
+    return '<div class="empty"><strong>' + title + "</strong>" + esc(sc.err) +
+      (sc.config ? "" : '<br><button class="back" data-act="reload">TRY AGAIN</button>') + "</div>";
+  }
+  /** Last good rows kept on screen while Salesforce can't be reached. */
+  function staleBanner(sc) {
+    return '<div class="empty offline" role="status"><strong>OFFLINE · ' + minutesOld(sc) + " M OLD</strong>" +
+      "Showing the list from " + esc(fmtTime(new Date(sc.at).toISOString())) + ". Saving is paused until Salesforce answers again; the app keeps trying on its own." +
+      (sc.err ? '<span class="why">' + esc(sc.err) + "</span>" : "") + "</div>";
+  }
+
   function modeTabs() {
+    var n = showsRows(state.scr.board) ? "<span>" + state.orders.length + "</span>" : "";
     return '<div class="mode-tabs" role="tablist">' +
-      '<button role="tab" data-act="mode" data-m="board" aria-selected="' + (state.mode === "board") + '">IN PRODUCTION <span>' + state.orders.length + "</span></button>" +
+      '<button role="tab" data-act="mode" data-m="board" aria-selected="' + (state.mode === "board") + '">IN PRODUCTION ' + n + "</button>" +
       '<button role="tab" data-act="mode" data-m="past" aria-selected="' + (state.mode === "past") + '">PAST ORDERS</button></div>';
   }
 
@@ -514,14 +655,14 @@
         '<span class="card-cust">' + esc(o.customer) + "</span>" + deliveryBadge(o) +
         '<span class="card-meta">' + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + (o.lastBoxAt ? " · last box " + esc(fmtDate(o.lastBoxAt)) + " " + esc(fmtTime(o.lastBoxAt)) : "") + "</span>" + tag + "</span></button>";
     }).join("");
-    var body;
-    if (!state.pastLoaded && state.pastError) body = '<div class="empty"><strong>COULDN\'T LOAD PAST ORDERS</strong>' + esc(state.pastError) + '<br><button class="back" data-act="reload">TRY AGAIN</button></div>';
-    else if (!state.pastLoaded) body = '<div class="empty">Loading past orders…</div>';
-    else if (!state.past.length) body = '<div class="empty"><strong>NO BOXES IN THE LAST 30 DAYS</strong>Screen-print orders show here once boxes are logged on them.</div>';
-    else body = (state.pastError ? '<div class="empty" style="margin-bottom:0"><strong>MAY BE OUT OF DATE</strong>' + esc(state.pastError) + "</div>" : "") + '<div class="cards">' + cards + "</div>";
+    var body, sc = state.scr.past, rows = showsRows(sc);
+    if (sc.s === "error") body = errorBody(sc, "COULDN'T LOAD PAST ORDERS");
+    else if (!rows) body = '<div class="empty">Loading past orders…</div>';
+    else body = (sc.s === "stale" ? staleBanner(sc) : "") + (state.past.length ? '<div class="cards">' + cards + "</div>"
+      : sc.s === "stale" ? "" : '<div class="empty"><strong>NO BOXES IN THE LAST 30 DAYS</strong>Screen-print orders show here once boxes are logged on them.</div>');
     return '<section class="list" aria-label="Past orders">' + modeTabs() +
-      '<div class="list-head ca-season-head"><div class="list-title"><h1>PAST ORDERS</h1><span class="list-count">' + state.past.length + "</span></div>" +
-      '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div>' + seasonChip(true) + "</div>" + (state.past.length ? searchBoxHtml() : "") + body + "</section>";
+      '<div class="list-head ca-season-head"><div class="list-title"><h1>PAST ORDERS</h1>' + (rows ? '<span class="list-count">' + state.past.length + "</span>" : "") + "</div>" +
+      '<div class="list-sub"><i></i>BOXES FROM THE LAST 30 DAYS · EDIT OR DELETE FOR 7 DAYS</div>' + seasonChip(true) + "</div>" + (rows && state.past.length ? searchBoxHtml() : "") + body + "</section>";
   }
 
   /** Order card progress: garments boxed so far against the order's total, with a bar. */
@@ -550,21 +691,20 @@
         '<span class="card-cust">' + esc(o.customer) + "</span>" + deliveryBadge(o) +
         progressHtml(o) + tag + "</span></button>";
     }).join("");
-    var body;
-    if (!state.loaded && state.loadError) {
-      body = '<div class="empty"><strong>COULDN\'T LOAD ORDERS</strong>' + esc(state.loadError) +
-        '<br><button class="back" data-act="reload">TRY AGAIN</button></div>';
-    } else if (!state.loaded) {
+    var body, sc = state.scr.board, rows = showsRows(sc);
+    if (sc.s === "error") {
+      body = errorBody(sc, "COULDN'T LOAD ORDERS");
+    } else if (!rows) {
       body = '<div class="empty">Loading orders…</div>';
     } else if (!state.orders.length) {
-      body = '<div class="empty"><strong>NOTHING IN PRODUCTION</strong>No screen-print orders are marked In Production right now. This list refreshes on its own.</div>';
+      body = sc.s === "stale" ? staleBanner(sc)
+        : '<div class="empty"><strong>NOTHING IN PRODUCTION</strong>No screen-print orders are marked In Production right now. This list refreshes on its own.</div>';
     } else {
-      body = (state.loadError ? '<div class="empty" style="margin-bottom:0"><strong>MAY BE OUT OF DATE</strong>' + esc(state.loadError) + "</div>" : "") +
-        '<div class="cards">' + cards + "</div>";
+      body = (sc.s === "stale" ? staleBanner(sc) : "") + '<div class="cards">' + cards + "</div>";
     }
     return '<section class="list" aria-label="Orders in production">' + modeTabs() +
-      '<div class="list-head ca-season-head"><div class="list-title"><h1>IN PRODUCTION</h1><span class="list-count">' + state.orders.length + "</span></div>" +
-      '<div class="list-sub"><i></i>SCREEN PRINT ONLY</div>' + seasonChip(true) + "</div>" + (state.orders.length ? searchBoxHtml() : "") + body + "</section>";
+      '<div class="list-head ca-season-head"><div class="list-title"><h1>IN PRODUCTION</h1>' + (rows ? '<span class="list-count">' + state.orders.length + "</span>" : "") + "</div>" +
+      '<div class="list-sub"><i></i>SCREEN PRINT ONLY</div>' + seasonChip(true) + "</div>" + (rows && state.orders.length ? searchBoxHtml() : "") + body + "</section>";
   }
 
   /* Seasonal / holiday theme -- the production dashboard's own seasonal.js + photos
@@ -578,7 +718,8 @@
   }
 
   function detailHtml() {
-    var o = current();
+    var o = current(), sc = scrNow();
+    if (!showsRows(sc)) return '<main class="detail"></main>';   // loading or failed: nothing about the work
     if (!o) return '<main class="detail"><div class="empty">Pick an order on the left.</div></main>';
     if (state.mode === "past") return pastDetailHtml(o);
     var split = boxedSplit(o), boxed = split.ordered;
@@ -1028,8 +1169,32 @@
   }
 
   /* ------------------------------------------------------------- saving -- */
+  /* A save only goes out from a LIVE list. Anywhere else it's refused out loud, the form stays as
+     it is, and the list is asked again at once so the catcher can tap save as soon as it's back. */
+  var REFUSED = {
+    stale: "This screen lost its connection and is showing the last data it had.",
+    loading: "This screen is still loading.",
+    error: "This screen is not connected to Salesforce."
+  };
+  function refuseSave(key) {
+    var sc = state.scr[key], before = sc.s;
+    showToast({ kind: "err", title: "NOT SAVED", body: REFUSED[before] + " Nothing was sent." + (before === "loading" ? "" : " Checking the connection now…") });
+    if (before === "loading") return;
+    loadList(key).then(function () {
+      if (!state.user || state.saving) return;
+      if (state.scr[key].s === "live") {
+        renderOverlay();
+        showToast({ kind: "ok", title: "SALESFORCE IS ANSWERING AGAIN", body: "Nothing was saved yet. Check your entries and tap save again." });
+      } else if (state.toast && state.toast.title === "NOT SAVED") {
+        state.toast.body = REFUSED[state.scr[key].s] + " Nothing was sent. Still offline; try again in a moment."; renderToast();
+      }
+    });
+  }
+
   function send(kind, payload, opts) {
     if (state.saving) return;                 // a second tap does nothing
+    var key = (kind === "edit" || kind === "del") && state.mode === "past" ? "past" : "board";
+    if (state.scr[key].s !== "live") { refuseSave(key); return; }
     opts = opts || {};
     state.saving = true; state.pending = { kind: kind, payload: payload, opts: opts };
     state.toast = null; renderToast(); renderOverlay();
@@ -1044,7 +1209,7 @@
         if (po) Array.prototype.push.apply(po.boxes, r.data.boxes || []);
         state.sheet = null; state.dup = null; renderOverlay(); renderMain();
         showToast({ kind: "err", title: r.data.created + " CREATED · " + r.data.failed + " NOT CREATED", body: r.data.message || "" });
-        loadOrders(true);
+        loadOrders();
         return;
       }
       if (r.ok) {
@@ -1135,15 +1300,17 @@
     renderMain();
     if (state.pin.length === 4) {
       state.pinBusy = true;
-      api("POST", "/api/login", { pin: state.pin }).then(function (r) {
+      // Signing in is one of the moments for the big loader: the PIN check, the setup and the
+      // first order list each run inside foregroundLoad(), so they read as one loader.
+      foregroundLoad(function () { return api("POST", "/api/login", { pin: state.pin }); }).then(function (r) {
         state.pinBusy = false;
         if (r.ok) {
           state.pin = ""; state.pinErr = ""; state.signoutMsg = "";
-          loadSetup().then(function () {
+          foregroundLoad(loadSetup).then(function () {
             renderAll();
             var d = state.draft;
             if (d && state.user && d.user !== state.user.name) state.draft = null;   // never hand one catcher's entries to another
-            (d && d.mode === "past" ? Promise.all([loadOrders(), loadPast()]) : loadOrders()).then(restoreDraft);
+            foregroundLoad(function () { return d && d.mode === "past" ? Promise.all([loadOrders(), loadPast()]) : loadOrders(); }).then(restoreDraft);
           });
         } else {
           state.pin = ""; state.pinErr = (r.data && r.data.message) || "That PIN didn't work.";
@@ -1218,7 +1385,7 @@
   /* --------------------------------------------------------- events ------ */
   var handlers = {
     pin: function (el) { pinKey(el.getAttribute("data-k")); },
-    reload: function () { if (state.mode === "past") loadPast(); else loadOrders(); },
+    reload: function () { foregroundLoad(state.mode === "past" ? loadPast : loadOrders); },
     pick: function (el) {
       if (state.mode === "past") state.pastSelId = el.getAttribute("data-id"); else state.selId = el.getAttribute("data-id");
       state.view = "detail"; renderMain();
@@ -1230,8 +1397,10 @@
     },
     mode: function (el) {
       var m = el.getAttribute("data-m"); if (m === state.mode) return;
-      state.mode = m; state.view = "list"; state.q = ""; renderMain();
-      if (m === "past") loadPast(state.pastLoaded); else loadOrders(true);
+      state.mode = m; state.view = "list"; state.q = ""; renderMain(); paintConn();
+      // A list's FIRST load gets the big loader; one already on screen refreshes quietly (corner icon).
+      var load = m === "past" ? loadPast : loadOrders;
+      if (state.scr[m].s === "loading") foregroundLoad(load); else load();
     },
     "open-edit": function (el) {
       var o = current(); if (!o) return;
@@ -1402,24 +1571,34 @@
   });
   window.addEventListener("resize", applyZoom);
   window.addEventListener("beforeunload", function (e) { if (state.saving) { e.preventDefault(); e.returnValue = ""; } });
+  // Refreshes pause while the tablet's screen is off or the app is in the background;
+  // coming back to the front refreshes straight away.
   document.addEventListener("visibilitychange", function () {
     if (document.hidden || !state.user) return;
     keepAwake();
-    if (!state.sheet && !state.saving) { if (state.mode === "past") loadPast(true); else loadOrders(true); }
+    if (!state.sheet && !state.saving && scrNow().s !== "loading") { if (state.mode === "past") loadPast(); else loadOrders(); }
   });
 
   function tickClock() {
     document.getElementById("clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (state.user && scrNow().s === "stale") paintConn();   // keeps "Offline · N m old" counting
   }
   setInterval(tickClock, 15000); tickClock();
-  setInterval(function () {
-    if (state.user && !state.sheet && !state.saving && !document.hidden) { if (state.mode === "past") loadPast(true); else loadOrders(true); }
-  }, POLL_MS);
+  /* One timer per list. On each tick: skip silently while someone is in the middle of something
+     (any form, dialog or the mockup viewer is open, or a save is on its way -- a redraw underneath
+     would swap what they're reading), else ask shouldPoll() and only then reload in the background. */
+  function pollTick(key) {
+    if (!state.user || document.hidden || state.mode !== key) return;
+    if (state.sheet || state.saving) return;
+    if (shouldPoll(state.scr[key])) loadList(key);
+  }
+  setInterval(function () { pollTick("board"); }, POLL_MS.board);
+  setInterval(function () { pollTick("past"); }, POLL_MS.past);
 
   /* ------------------------------------------------------------ start ---- */
   applyZoom();
   // A refresh (any page load) signs out: end any earlier sign-in on the server, then show the PIN pad.
   api("POST", "/api/logout").then(function () {
-    renderAll(); setConn("");
+    renderAll(); paintConn();
   });
 })();

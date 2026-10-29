@@ -111,6 +111,42 @@ Pages project, its own Salesforce connection and its own PIN list.
 - – / + in the header makes the whole screen smaller or bigger (85%–175%). At larger
   sizes the screen switches to one column.
 
+## Refresh and loading rules (copied from The Forge, 10-29)
+
+Taken one for one from *The Forge Refresh and Loading Rules Handoff* (2026-10-29).
+
+- **Each list holds one connection state** (In Production and Past Orders separately), and that state alone
+  decides what it shows, whether it refreshes and whether it may save:
+
+  | State | When | On screen | Auto-refresh | Can save |
+  |---|---|---|---|---|
+  | `loading` | first load still on its way | "Loading orders…", no counts | no | no |
+  | `live` | the last load worked | the real list; header "Live · Salesforce" (green) | every tick | yes |
+  | `stale` | a refresh failed twice, but real rows were on screen | the last good rows + "OFFLINE · N M OLD" banner; header "Offline · N m old" | every tick | no |
+  | `error` | the load failed and nothing good is on screen | nothing but the reason (Salesforce's own sentence) | every 5th tick | no |
+
+  The Forge's `demo` state isn't used: The Catch has no sample data.
+- **Timers:** In Production every 15 s, Past Orders every 30 s. A tick is skipped silently while any form,
+  dialog or the mockup viewer is open, or a save is on its way, and while the tablet's screen is off / the app is
+  in the background (coming back refreshes straight away).
+- **One missed refresh is forgiven:** the first failed refresh of a live list changes nothing; the second shows
+  Offline. A good load goes straight back to live. Exceptions shown at once, with **no Try Again button**
+  (retrying can't fix them): `sf_auth_failed` (Salesforce refused the sign-in) and `org_not_configured`
+  (the secrets, or a field the screen reads, are missing).
+- **Saves only from a live list.** Otherwise: "NOT SAVED" and why, nothing is sent, the form keeps what was typed,
+  and the list is asked again at once; when Salesforce answers, the toast says so and the catcher taps save again.
+- **Big centre loader** (The Catch mark, "LOADING", dark blurred backdrop): only for signing in and a list's
+  first load (Past Orders the first time it's opened, Try Again on an error). Paints after 320 ms, hides when the
+  data lands, and after 15 s at most.
+- **Small corner icon** (spinning red ring + "LOADING", 8 px under the header's right corner): every request,
+  at once, for at least 500 ms. A request older than 15 s turns it amber: "STILL CONNECTING…". It never takes a tap.
+  Neither indicator prints.
+- **Scroll is kept** when a refresh redraws the screen (the card list, and the order panel while it's the same order).
+- **Server:** a sign-in or download still in progress is never shared between requests (only a finished token,
+  describe or cached picture is). Salesforce reads give up after 30 s; signing in to Salesforce after 8 s, with
+  one quick retry. Error codes: 409 `org_not_configured`, 502 `sf_auth_failed`, 502 `query_failed` (with
+  Salesforce's own sentence), 504 `sf_unreachable`.
+
 ## Seasonal / holiday look (same as the production dashboard)
 
 `seasonal.js` and the photos in `seasons/` are copied **unchanged** from the production
@@ -145,7 +181,7 @@ loaded. The animation is off for tablets set to reduce motion.
   If someone did, the app re-reads and adds on top, so two catchers can't overwrite each other.
 - Every save first re-checks that the order is still In Production for screen print.
 - Salesforce's own error message (for example a validation rule) is shown to the catcher.
-- A failed Salesforce read is shown as an error, never as an empty list.
+- A failed Salesforce read is shown as an error, never as an empty list (see Refresh and loading rules).
 - The browser never sees Salesforce credentials or stored file links. Mockups are the
   JPG/PNG pictures in the Order's **Files** list (newest first; the big view flips
   between them). If an order has none, `Order.Artwork_URL__c` is used instead. Both are fetched by the server, and only for orders the app is
@@ -230,7 +266,8 @@ node tools/test.mjs
 
 The tests run against a pretend Salesforce, with no network. They cover sign-in, the
 PIN brake, the order filter, box and misprint saves, duplicate taps, timeouts, two
-catchers at once, and validation-rule messages.
+catchers at once, validation-rule messages, the error codes, and the Salesforce
+sign-in retry (no shared sign-in in progress).
 
 ## Delivery Method badge (10-27)
 Every order card and the order header show the order's **Delivery Method** (`Order.Shipping_Delivery__c`):

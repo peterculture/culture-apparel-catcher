@@ -1,4 +1,4 @@
-// Offline tests for the Dryer Catch API, against a pretend Salesforce.
+// Offline tests for The Catch API, against a pretend Salesforce.
 // Nothing here touches the network.     Run:  node tools/test.mjs
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -81,12 +81,18 @@ globalThis.fetch = async (url, init = {}) => {
     if (behave.artEps) return new Response(new TextEncoder().encode("%!PS-Adobe-3.0 EPSF-3.0\n"), { status: 200, headers: { "Content-Type": "application/postscript" } });
     return new Response(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]), { status: 200, headers: { "Content-Type": "image/jpeg" } });
   }
-  if (url.endsWith("/services/oauth2/token")) return res(200, { access_token: "TOKEN", instance_url: "https://ca.my.salesforce.com" });
+  if (url.endsWith("/services/oauth2/token")) {
+    if (behave.loginHang && behave.loginHang-- > 0) throw new Error("timed out");
+    if (behave.loginRefuse) return res(400, { error: "invalid_client", error_description: "invalid client credentials" });
+    if (behave.loginSlow) await new Promise((r) => setTimeout(r, behave.loginSlow));
+    return res(200, { access_token: "TOKEN", instance_url: "https://ca.my.salesforce.com" });
+  }
   const u = new URL(url);
   if (u.pathname.endsWith("/query")) {
     const q = u.searchParams.get("q");
     if (/FROM Order WHERE/.test(q)) {
       if (behave.queryFail) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column" }]);
+      if (behave.queryBusy) return res(503, [{ errorCode: "SERVER_UNAVAILABLE", message: "Server busy, try later" }]);
       if (behave.noDeliveryField && /Shipping_Delivery__c/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column 'Shipping_Delivery__c' on entity 'Order'" }]);
       const idm = q.match(/AND Id = '([^']+)'/);
       const carry = /Packaging_Count__c = null/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : "";
@@ -273,9 +279,49 @@ await test("Orders list", async () => {
 
 await test("Orders list: a Salesforce failure is an error, not an empty list", async () => {
   reset(); const env = ENV(); const cookie = await signIn(env);
-  behave.queryFail = true;
-  const r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
-  ok(r.status === 502, "502, not 200 with zero orders");
+  behave.queryBusy = true;
+  let r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  let d = await r.json();
+  ok(r.status === 502 && d.error === "query_failed", "502 query_failed, not 200 with zero orders");
+  ok(/Server busy, try later/.test(d.message), "with Salesforce's own sentence: " + d.message);
+  behave.queryBusy = false; behave.queryFail = true;
+  r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  d = await r.json();
+  ok(r.status === 409 && d.error === "org_not_configured" && /No such column/.test(d.message), "missing field -> 409 org_not_configured, naming it");
+});
+
+await test("Errors name the kind of failure (Forge rules)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  behave.loginRefuse = true;
+  let r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  let d = await r.json();
+  ok(r.status === 502 && d.error === "sf_auth_failed", "Salesforce refuses the sign-in -> sf_auth_failed");
+  ok(calls.filter((c) => c.url.endsWith("/oauth2/token")).length === 1, "a refused sign-in is not retried");
+  reset();
+  const bare = Object.assign(ENV(), { SF_CLIENT_SECRET: "" }); const c2 = await signIn(bare);
+  r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, c2), env: bare });
+  d = await r.json();
+  ok(r.status === 409 && d.error === "org_not_configured", "no Salesforce secrets -> 409 org_not_configured");
+});
+
+await test("Sign-in to Salesforce: one quick retry when it doesn't answer; never a shared sign-in in progress", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  behave.loginHang = 1;
+  let r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  ok(r.status === 200 && calls.filter((c) => c.url.endsWith("/oauth2/token")).length === 2, "first try didn't answer, the quick retry did -> 200");
+  reset(); const env2 = ENV(); const c2 = await signIn(env2);
+  behave.loginHang = 2;
+  r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, c2), env: env2 });
+  ok(r.status === 504 && (await r.json()).error === "sf_unreachable", "both tries without an answer -> 504 'Salesforce did not answer'");
+  // two requests at once with no token yet: each signs in itself (no shared promise)
+  reset(); const env3 = ENV(); const c3 = await signIn(env3);
+  behave.loginSlow = 30;
+  const [a, b] = await Promise.all([1, 2].map(() => orders.onRequestGet({ request: req("GET", "/api/orders", null, c3), env: env3 })));
+  ok(a.status === 200 && b.status === 200, "both requests answered");
+  ok(calls.filter((c) => c.url.endsWith("/oauth2/token")).length === 2, "each request made its own sign-in");
+  behave.loginSlow = 0;
+  await orders.onRequestGet({ request: req("GET", "/api/orders", null, c3), env: env3 });
+  ok(calls.filter((c) => c.url.endsWith("/oauth2/token")).length === 2, "a FINISHED token is reused");
 });
 
 await test("Log a box", async () => {
@@ -436,7 +482,7 @@ await test("Misprint: refused inputs save nothing", async () => {
   ok(posts("/sobjects/Order/").length === 0, "nothing written");
 });
 
-await test("Mockup: card + big picture at once = one download; a web page is never passed on", async () => {
+await test("Mockup: two requests at once each get the picture (no shared download); a web page is never passed on", async () => {
   reset(); const env = ENV(); const cookie = await signIn(env);
   const get = () => mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA", null, cookie), env });
   const [a, b] = await Promise.all([get(), get()]);
@@ -444,7 +490,7 @@ await test("Mockup: card + big picture at once = one download; a web page is nev
   ok(a.headers.get("Content-Type") === "image/jpeg", "as an image");
   const [ab, bb] = await Promise.all([a.arrayBuffer(), b.arrayBuffer()]);
   ok(ab.byteLength === 6 && bb.byteLength === 6, "each answer has its own full copy of the picture");
-  ok(calls.filter((c) => c.url.includes("file.force.com")).length === 1, "only ONE download from Salesforce");
+  ok(calls.filter((c) => c.url.includes("file.force.com")).length === 2, "each request did its own download (a download in progress is never shared)");
   let r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000002AAA", null, cookie), env });
   ok(r.status === 404, "order with no artwork link -> 404");
   behave.artHtml = true;

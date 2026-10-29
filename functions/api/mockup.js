@@ -3,10 +3,13 @@
  * The mockup picture for one In Production screen-print order.
  *
  * The picture is kept in Cloudflare's cache for 10 minutes, keyed by order, so
- * the small card, the big picture and every tablet share ONE download from
- * Salesforce instead of each asking at once (asking twice at the same moment is
- * what made the small cards fail). Only a signed-in catcher can read it, and an
- * order only gets into the cache after passing the In Production check.
+ * once ONE download has FINISHED every tablet gets it from the cache. Only a
+ * signed-in catcher can read it, and an order only gets into the cache after
+ * passing the In Production check.
+ *
+ * A download still in progress is never shared between requests (The Forge rule,
+ * 2026-10-29): a cancelled request would leave everyone waiting on it. On one
+ * tablet the small card and the big picture already share one download.
  */
 import { json, errorResponse, SF_ID } from "./_sf.js";
 import { requireUser } from "./_session.js";
@@ -14,11 +17,9 @@ import { loadOneOrder } from "./_orders.js";
 import { mockupUrlsFor, mockupFilesFor, fetchMockup, fetchFileMockup } from "./_mockup.js";
 
 const CACHE_SECONDS = 600;
-const inFlight = new Map(); // orderId -> Promise<{type, bytes}|null>, so one isolate never fetches the same picture twice at once
 
-// Every answer gets its OWN copy of the bytes: on Cloudflare a body handed to one
-// Response can't be used again, and the same picture may be going to several
-// requests that were waiting on one download.
+// The answer and the cache each get their OWN copy of the bytes: on Cloudflare a
+// body handed to one Response can't be used again.
 function pictureResponse(pic) {
   return new Response(pic.bytes.slice(0), {
     headers: { "Content-Type": pic.type, "Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff" },
@@ -33,7 +34,6 @@ export async function onRequestGet({ request, env, waitUntil }) {
     const orderId = params.get("orderId") || "";
     if (!SF_ID.test(orderId)) return json({ error: "bad_order_id", message: "That order link is not valid." }, 400);
     const n = Math.min(5, Math.max(0, parseInt(params.get("n") || "0", 10) || 0));  // which picture (0 = newest)
-    const jobKey = orderId + ":" + n;
 
     const cache = typeof caches !== "undefined" ? caches.default : null;
     const key = new Request(`https://mockup-cache.internal/${orderId}/${n}`);
@@ -46,19 +46,14 @@ export async function onRequestGet({ request, env, waitUntil }) {
       }
     }
 
-    let job = inFlight.get(jobKey);
-    if (!job) {
-      job = (async () => {
-        const order = await loadOneOrder(env, orderId);
-        const files = (await mockupFilesFor(env, [order])).get(order.id) || [];
-        if (files.length) return files[n] ? fetchFileMockup(env, files[n].cv) : { none: true };
-        const raw = n === 0 ? (await mockupUrlsFor(env, [order])).get(order.id) : null;
-        if (!raw) return { none: true };
-        return fetchMockup(env, raw);
-      })().finally(() => inFlight.delete(jobKey));
-      inFlight.set(jobKey, job);
-    }
-    const pic = await job;
+    const pic = await (async () => {
+      const order = await loadOneOrder(env, orderId);
+      const files = (await mockupFilesFor(env, [order])).get(order.id) || [];
+      if (files.length) return files[n] ? fetchFileMockup(env, files[n].cv) : { none: true };
+      const raw = n === 0 ? (await mockupUrlsFor(env, [order])).get(order.id) : null;
+      if (!raw) return { none: true };
+      return fetchMockup(env, raw);
+    })();
     if (pic && pic.none) return json({ error: "no_mockup", message: "This order has no mockup in Salesforce." }, 404);
     if (!pic) return json({ error: "mockup_unavailable", message: "The mockup could not be loaded." }, 502);
 
