@@ -1,5 +1,5 @@
 /**
- * Salesforce connection for the Dryer Catch app.
+ * Salesforce connection for The Catch app.
  *
  * ONE org only (Production). There is deliberately no environment switcher:
  * this app talks to exactly the org its three secrets point at.

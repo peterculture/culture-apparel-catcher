@@ -1,4 +1,4 @@
-/* Dryer Catch — styles. Colours, fonts and shapes follow the production
+/* The Catch — styles. Colours, fonts and shapes follow the production
    dashboard's tokens.css so the two feel like one system. */
 :root {
   --surface-page: #08080A; --surface-raised: #0D0D0F; --surface-card: #121215;
@@ -28,9 +28,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 .hdr { position: fixed; inset: 0 0 auto 0; height: 76px; z-index: 50; display: flex; align-items: center; gap: 16px; padding: 0 16px 0 0;
   background: linear-gradient(90deg,#0E0F12,#15161A 55%,#0E0F12); border-bottom: 2px solid #7A1A15; font-size: 16px; }
 .hdr-logo { align-self: stretch; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: #0B0C0E; border-right: 1px solid #1F2126; flex-shrink: 0; }
-.logo-1 { font: 700 22px/0.9 'Oswald'; color: #F4F2EC; }
-.logo-2 { font: 600 11px/1 'Oswald'; letter-spacing: .32em; color: #F4F2EC; margin-top: 4px; padding-left: 18px; }
-.hdr-title { font: 600 18px/1 'Oswald'; letter-spacing: .18em; white-space: nowrap; }
+.hdr-brand { display: block; height: 52px; width: auto; }   /* The Catch web logo (brand/catch-logo-web.png) */
+.pin-logo { display: block; width: min(10.5rem, 50%); height: auto; }   /* The Catch main logo on the sign-in screen */
 .hdr-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
 .hdr-clock { padding-right: 14px; border-right: 1px solid var(--warn); white-space: nowrap; }
 #clock { font: 500 18px/1 'Oswald'; color: #F4F2EC; }
@@ -46,7 +45,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 .who { display: flex; align-items: center; gap: 10px; background: transparent; border: 1px solid transparent; border-radius: 14px; padding: 4px 8px 4px 4px; min-height: 54px; }
 .who-init { width: 44px; height: 44px; border-radius: 50%; background: var(--text-primary); color: #111; font: 700 15px/44px 'Archivo'; text-align: center; }
 .who-name { font: 500 15px/1 'Archivo'; white-space: nowrap; }
-@media (max-width: 900px) { .hdr-title, .hdr-clock, .who-name { display: none; } }
+@media (max-width: 900px) { .hdr-clock, .who-name { display: none; } .hdr-brand { height: 42px; } }
 
 /* ---------- body ---------- */
 .app { position: fixed; top: 78px; left: 0; right: 0; bottom: 0; display: flex; }
@@ -200,7 +199,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 .toast .dismiss { width: 3.25rem; height: 3.25rem; border-radius: .75rem; border: 1px solid rgba(255,255,255,.25); background: transparent; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
 /* ---------- PIN screen ---------- */
-.pin-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 1.25rem; overflow-y: auto; }
+.pin-wrap { flex: 1; display: flex; align-items: flex-start; justify-content: center; padding: 1.25rem; overflow-y: auto; }
+.pin-wrap > .pin-box { margin: auto 0; }   /* centred when it fits; starts at the top (never under the header) when it doesn't */
 .pin-box { width: min(26rem, 100%); display: flex; flex-direction: column; align-items: center; gap: 1.1rem; }
 .pin-box h1 { margin: 0; font: 600 1.6rem/1 'Oswald'; letter-spacing: .14em; }
 .pin-box p { margin: 0; font: 500 1rem/1.4 'Archivo'; color: var(--text-tertiary); text-align: center; }

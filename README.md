@@ -1,4 +1,6 @@
-# Dryer Catch — Culture Apparel
+# The Catch — Culture Apparel
+
+(Renamed from "Dryer Catch" on 10-29. Logos and icons live in `brand/`; the home-screen manifest is `manifest.webmanifest`.)
 
 A tablet app for the catchers at the end of the screen-print dryers. It is a separate
 project from the production dashboard: its own GitHub repository, its own Cloudflare

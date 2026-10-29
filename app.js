@@ -1,4 +1,4 @@
-/* Dryer Catch — tablet app for the catchers at the end of the screen-print dryers.
+/* The Catch — tablet app for the catchers at the end of the screen-print dryers.
  *
  * Plain JavaScript, no build step. Everything the catcher sees comes from
  * /api/*, which talks to Salesforce. Nothing is ever shown as "saved" until
@@ -489,7 +489,8 @@
       var aria = k === "<" ? "Delete last digit" : k === "C" ? "Clear" : k;
       return '<button data-act="pin" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '" aria-label="' + aria + '">' + label + "</button>";
     }).join("");
-    return '<div class="pin-wrap ca-season-pin"><div class="pin-box">' + seasonChip(false) +
+    return '<div class="pin-wrap ca-season-pin"><div class="pin-box">' +
+      '<img class="pin-logo" src="/brand/catch-logo.png" alt="The Catch · Culture Apparel" width="623" height="636">' + seasonChip(false) +
       "<h1>WHO'S CATCHING?</h1><p>Enter your 4-digit PIN</p>" +
       (state.signoutMsg ? '<div class="pin-note">' + esc(state.signoutMsg) + "</div>" : "") +
       '<div class="dots" id="dots">' + dots + "</div>" +
