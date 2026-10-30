@@ -40,7 +40,7 @@ const ORDER_FIELDS = [
   "Id", "OrderNumber", "GOA_Order_Number__c", "Account.Name",
   "Print_Date__c", "Printer__r.Name", "Specifications_for_Printing__c",
   "TotalQtyMisprints__c", "Misprint_Details__c", "Artwork_URL__c", "LastModifiedDate",
-  "Order_Substatus__c", "Packaging_Count__c",
+  "Order_Substatus__c", "Packaging_Count__c", "StatusCode",
 ];
 
 /* Delivery Method (Order.Shipping_Delivery__c, picklist), shown as a badge on the tablet (10-27).
@@ -82,6 +82,36 @@ async function selectOrders(env, rest) {
 const SEEN_KEY = "board:seen";
 const SEEN_MS = 14 * 86400000;
 
+/* Orders let go from the board without a box count (10-30). Salesforce locks an order once it is
+ * activated (Status -> Sent Tracking), and the app's login may not be allowed to write
+ * Packaging_Count__c then. FINISH CATCHING on such an order releases it here, so it can't sit on the
+ * board for ever. Kept 14 days, like board:seen. */
+const RELEASED_KEY = "board:released";
+
+async function readReleased(env) {
+  if (!env.CATCHER_KV) return {};
+  try {
+    const v = JSON.parse((await env.CATCHER_KV.get(RELEASED_KEY)) || "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch (_) { return {}; }
+}
+
+/** Take an order off the board without a box count. Only for orders that have left In Production. */
+export async function releaseFromBoard(env, orderId) {
+  if (!env.CATCHER_KV) return false;
+  const cutoff = Date.now() - SEEN_MS;
+  const released = await readReleased(env);
+  const next = {};
+  for (const id of Object.keys(released)) if (Number(released[id]) > cutoff) next[id] = released[id];
+  next[orderId] = Date.now();
+  try {
+    await env.CATCHER_KV.put(RELEASED_KEY, JSON.stringify(next));
+    const seen = await readSeen(env);
+    if (seen[orderId]) { delete seen[orderId]; await env.CATCHER_KV.put(SEEN_KEY, JSON.stringify(seen)); }
+    return true;
+  } catch (err) { console.error("board:released write failed", err && err.message); return false; }
+}
+
 /** orderId -> first time it was on the board (ms). Empty without KV. */
 async function readSeen(env) {
   if (!env.CATCHER_KV) return {};
@@ -112,9 +142,9 @@ function sizeRank(s) {
 
 /** The orders the app may show — and therefore the only orders it may write to. */
 export async function loadOrders(env, { orderId } = {}) {
-  const seen = await readSeen(env);
+  const [seen, released] = await Promise.all([readSeen(env), readReleased(env)]);
   const cutoff = Date.now() - SEEN_MS;
-  const carry = Object.keys(seen).filter((id) => SF_ID.test(id) && Number(seen[id]) > cutoff).slice(0, 150);
+  const carry = Object.keys(seen).filter((id) => SF_ID.test(id) && Number(seen[id]) > cutoff && !released[id]).slice(0, 150);
   let where = `(${inProductionWhere(env)})`;
   if (carry.length) where = `(${where} OR (Id IN (${carry.map(soqlQuote).join(",")}) AND Packaging_Count__c = null))`;
   if (orderId) where += ` AND Id = ${soqlQuote(orderId)}`;
@@ -242,6 +272,8 @@ async function buildOrders(env, orders) {
       status: o.Order_Substatus__c || "",
       finished: o.Packaging_Count__c != null,
       finishedCount: o.Packaging_Count__c != null ? Number(o.Packaging_Count__c) : null,
+      // Activated (Status Sent Tracking or later): Salesforce locks the order and its lines.
+      activated: o.StatusCode === "Activated",
       lines,
       total: lines.reduce((a, l) => a + l.total, 0),
       extraBoxed,

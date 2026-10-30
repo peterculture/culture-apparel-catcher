@@ -175,6 +175,7 @@ globalThis.fetch = async (url, init = {}) => {
       return new Response(null, { status: 412 });
     }
     if (behave.validation) return res(400, [{ errorCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "Production and Delivery Dates are required to proceed." }]);
+    if (o.StatusCode === "Activated" && behave.lockActivated) return res(400, [{ errorCode: "INSUFFICIENT_ACCESS_OR_READONLY", message: "You don't have permission to edit or delete an activated order." }]);
     Object.assign(o, JSON.parse(init.body), { LastModifiedDate: new Date().toISOString() });
     return new Response(null, { status: 204 });
   }
@@ -919,6 +920,36 @@ await test("Delivery Method badge: read from Order.Shipping_Delivery__c", async 
   if (ful && byId[ful.Id]) ok(byId[ful.Id].key === "fulfillment" && byId[ful.Id].label === "FULFILLMENT", "Order Fulfillment -> FULFILLMENT badge");
   const blank = db.orders.find((o) => o.Shipping_Delivery__c == null && byId[o.Id]);
   if (blank) ok(byId[blank.Id].key === "none", "blank -> NO DELIVERY METHOD");
+});
+
+await test("Activated order: FINISH CATCHING lets it go when Salesforce refuses the count (10-30)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const list = async () => (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders;
+  await list();                                                    // both orders seen on the board
+  let r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", qty: 20, name: "Tees 2", requestId: "req-act00001" }, cookie), env });
+  ok(r.status === 201, "box logged");
+  db.orders[0]._inProd = false; db.orders[0].StatusCode = "Activated"; behave.lockActivated = true;
+  let l = await list();
+  ok(l.some((o) => o.id === "801000000000001AAA" && o.activated === true), "moved-on order still on the board, marked activated");
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000001AAA", requestId: "req-act00002" }, cookie), env });
+  let d = await r.json();
+  ok(r.status === 200 && d.countSaved === false && d.boxCount === 2 && /already activated/.test(d.message), "200, countSaved false, says why -> " + d.message);
+  ok(db.orders[0].Packaging_Count__c == null, "nothing written to the Order");
+  l = await list();
+  ok(!l.some((o) => o.id === "801000000000001AAA"), "off the board");
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000001AAA", requestId: "req-act00002" }, cookie), env });
+  d = await r.json();
+  ok(r.status === 200 && d.countSaved === false, "double tap: same answer");
+  // Still In Production + activated: not released, the error stays.
+  db.orders[1].StatusCode = "Activated";
+  await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000002AAA", type: "Culture Hat Box", qty: 8, name: "Hats 1", requestId: "req-act00003" }, cookie), env });
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000002AAA", requestId: "req-act00004" }, cookie), env });
+  ok(r.status === 422, "still In Production: refused, order stays");
+  // With the permission (Salesforce accepts): count written as before.
+  behave.lockActivated = false;
+  r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000002AAA", requestId: "req-act00005" }, cookie), env });
+  d = await r.json();
+  ok(r.status === 200 && d.countSaved !== false && db.orders[1].Packaging_Count__c === 1, "Edit Activated Orders granted: count written");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {

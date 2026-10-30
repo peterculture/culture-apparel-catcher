@@ -273,3 +273,17 @@ sign-in retry (no shared sign-in in progress).
 Every order card and the order header show the order's **Delivery Method** (`Order.Shipping_Delivery__c`):
 PICKUP, FULFILLMENT (Order Fulfillment), SHIPPING, DELIVERY, SPLIT SHIP, or NO DELIVERY METHOD when it's blank.
 The label carries the meaning; each method also has its own color.
+
+## Activated orders and FINISH CATCHING (10-30)
+
+Salesforce activates an order when its Status moves to **Sent Tracking**, and then only users with
+**Edit Activated Orders** may change it. If the crew ships an order before a catcher taps
+FINISH CATCHING, writing `Packaging_Count__c` fails with "You don't have permission to edit or delete
+an activated order", and the order used to stay on the board for good.
+
+- **Fix 1 (Salesforce):** run `tools/catcher-edit-activated-orders.apex` once in Production. It turns on
+  Edit Activated Orders in `Catcher_App_Access`, so the box count is written as normal.
+- **Fix 2 (app):** if Salesforce still refuses the count on an activated order that has left In
+  Production, FINISH CATCHING lets the order go from the board anyway (KV key `board:released`, 14 days)
+  and the tablet says "OFF THE BOARD · COUNT NOT SAVED". The boxes are already in Salesforce. An order
+  that is still In Production is never let go this way.

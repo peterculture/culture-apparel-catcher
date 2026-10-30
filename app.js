@@ -1231,7 +1231,8 @@
           showToast({ kind: "ok", title: "BOX SAVED", body: "“" + r.data.box.name + "” · " + (r.data.box.sizes ? r.data.box.sizes.replace(/ = \d+$/, "") + " · " : "") + r.data.box.qty + " garments · " + r.data.box.type + " is in Salesforce on " + o.num + "." });
         } else if (kind === "fin" && o) {
           o.finished = true; o.finishedCount = r.data.boxCount;
-          if (r.data.fulfillment) showToast({ kind: "ok", title: "FULFILLMENT ORDER", body: o.num + ": Fulfillment order. No boxes. Saved in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
+          if (r.data.countSaved === false) showToast({ kind: "unsure", title: "OFF THE BOARD · COUNT NOT SAVED", body: r.data.message || (o.num + ": the box count couldn't be written, but the boxes are saved.") });
+          else if (r.data.fulfillment) showToast({ kind: "ok", title: "FULFILLMENT ORDER", body: o.num + ": Fulfillment order. No boxes. Saved in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
           else showToast({ kind: "ok", title: "ORDER FINISHED", body: o.num + ": " + r.data.boxCount + (r.data.boxCount === 1 ? " box" : " boxes") + " saved as the box count in Salesforce." + (o.inProduction ? "" : " It's off your board now.") });
           if (!o.inProduction) {
             state.orders = state.orders.filter(function (x) { return x.id !== o.id; });

@@ -11,11 +11,17 @@
  * shows as "Fulfillment order. No boxes." Only allowed while the order has no boxes
  * logged, so a real box count is never overwritten with 0.
  *
- * Answers 200 only after Salesforce has confirmed the update.
+ * ACTIVATED ORDER (10-30): once the order is activated (Status -> Sent Tracking), Salesforce may
+ * refuse the box count ("You don't have permission to edit or delete an activated order"). If the
+ * order has also left In Production, the order is let go from the board anyway (its boxes are
+ * already saved in Salesforce) and the answer says the count was not written: countSaved: false.
+ * The permission "Edit Activated Orders" on Catcher_App_Access lets the count be written instead.
+ *
+ * Answers 200 only after Salesforce has confirmed the update, or after a release like the above.
  */
 import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
-import { loadOneOrder } from "./_orders.js";
+import { loadOneOrder, releaseFromBoard } from "./_orders.js";
 
 export async function onRequestPost({ request, env }) {
   const auth = await requireUser(request, env);
@@ -45,6 +51,18 @@ export async function onRequestPost({ request, env }) {
       if (resp.status !== 204) {
         const data = await resp.json().catch(() => null);
         console.error("finish save failed", resp.status, sfErrorCode(data), sfMessage(data));
+        if (order.activated && !order.inProduction && resp.status >= 400 && resp.status < 500 && !fulfillment
+            && await releaseFromBoard(env, order.id)) {
+          const released = {
+            ok: true, orderId: order.id, boxCount: count, fulfillment, countSaved: false,
+            boxed: order.boxes.reduce((a, b) => a + b.qty, 0), total: order.total,
+            inProduction: false, by: auth.user.name,
+            message: `${order.num} is already activated in Salesforce, so its box count (${count}) couldn't be written` +
+              (sfMessage(data) ? ` ("${sfMessage(data)}")` : "") + `. The ${count === 1 ? "box is" : "boxes are"} saved. It's off your board now.`,
+          };
+          await rememberResult(env, requestId, released);
+          return json(released, 200);
+        }
         throw new SfError("save_failed", resp.status >= 500 ? 502 : 422,
           "Salesforce did not save the box count" + (sfMessage(data) ? `: "${sfMessage(data)}"` : ".") + " The order stays on the board.");
       }
