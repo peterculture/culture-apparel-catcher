@@ -282,7 +282,8 @@ FINISH CATCHING, writing `Packaging_Count__c` fails with "You don't have permiss
 an activated order", and the order used to stay on the board for good.
 
 - **Fix 1 (Salesforce):** run `tools/catcher-edit-activated-orders.apex` once in Production. It turns on
-  Edit Activated Orders in `Catcher_App_Access`, so the box count is written as normal.
+  Edit Activated Orders (and Activate Order, which Salesforce requires with it) in
+  `Catcher_App_Access`, so the box count is written as normal. The app never changes Status.
 - **Fix 2 (app):** if Salesforce still refuses the count on an activated order that has left In
   Production, FINISH CATCHING lets the order go from the board anyway (KV key `board:released`, 14 days)
   and the tablet says "OFF THE BOARD · COUNT NOT SAVED". The boxes are already in Salesforce. An order
