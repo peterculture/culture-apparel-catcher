@@ -39,7 +39,9 @@
     logoutPending: null,   // a logout waiting for a save that's already on its way to Salesforce
     draft: null,           // an unsaved form kept for the SAME catcher after an automatic sign-out
     signoutMsg: "",
-    help: null             // { text, sending, sent, emailed, err } while the Help pop-up is open (11-02)
+    help: null,            // { text, sending, sent, emailed, err } while the Help pop-up is open (11-02)
+    picking: null,         // { orderId, ids: { boxId: true } } while SELECT is on under "Boxes on this order" (11-02)
+    delMany: null          // { ids: [boxId..], requestId } while the "delete N boxes" dialog is open
   };
 
   var $app = document.getElementById("app");
@@ -122,6 +124,7 @@
     box: '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/></svg>',
     warn: '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4.5M12 17.5v.01"/></svg>',
     expand: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+    tick: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     check: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     bang: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8M12 18v.01"/></svg>',
     shirt: '<svg width="70%" height="70%" viewBox="0 0 48 48" aria-hidden="true"><path d="M17 8 L9 12 L5 20 L10 23 L13 19 L13 41 L35 41 L35 19 L38 23 L43 20 L39 12 L31 8 Q24 13 17 8 Z" fill="#2a2a30" stroke="#4a4a52" stroke-width="1.2"/></svg>'
@@ -308,7 +311,7 @@
     state.user = null; state.logoutPending = null; state.q = "";
     state.orders = []; state.selId = null; state.past = []; state.pastSelId = null;
     state.scr = { board: freshScreen(), past: freshScreen() };
-    state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null;
+    state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null; state.picking = null; state.delMany = null;
     state.pending = null; state.saving = false; state.pin = ""; state.pinErr = ""; state.mode = "board"; state.view = "list";
     clearTimeout(toastTimer); state.toast = null; state.help = null; helpDraft = "";
     state.signoutMsg = reason === "expired" ? "Your sign-in ended." : "";
@@ -756,16 +759,29 @@
       '<div class="actions"><button class="big big-red" data-act="open-box">' + ICON.box + "LOG BOXES</button>" +
       '<button class="big big-warn" data-act="open-mis">' + ICON.warn + "REPORT MISPRINT</button></div>" +
       finishBtn(o) +
-      '<div class="log"><div class="sec-label">BOXES ON THIS ORDER</div>' +
-      (log || '<div class="empty" style="margin:0">No boxes logged yet.</div>') + misLog + "</div>" +
+      boxLogHtml(o, true, "BOXES ON THIS ORDER", log, "No boxes logged yet.", misLog) +
       "</main>";
   }
 
   /** Saved boxes, with Duplicate (board only), Edit and Delete -- or a lock once the 7 days are up. */
   function boxRowsHtml(o, onBoard) {
+    var pk = pickingFor(o);
     return o.boxes.map(function (b, i) {
       withWindow(b);
       var open = canChangeBox(b);
+      if (pk) {
+        // SELECT mode: the whole row is the tick box; locked boxes can't be picked.
+        var on = !!pk.ids[b.id];
+        var info = '<span class="log-text"><span class="log-main">' +
+          '<span class="kv"><span class="k">GARMENT TYPE</span>' + esc(b.name) + "</span>" +
+          '<span class="kv"><span class="k">PACKAGING TYPE</span>' + esc(b.type || "—") + "</span>" +
+          '<span class="kv"><span class="k">QUANTITY + SIZE COUNTED</span>' + esc(b.sizes || (b.qty + " garments (no size breakdown)")) + "</span></span>" +
+          '<span class="log-who">Saved ' + esc(fmtWhen(b.at)) + (b.by ? " by " + esc(b.by) : "") + "</span></span>";
+        if (!open) return '<div class="log-row box-row pick-row locked"><span class="pick-box" aria-hidden="true">' + (i + 1) + "</span>" + info +
+          '<span class="log-btns"><span class="log-lock">LOCKED · 7-DAY REVIEW ENDED</span></span></div>';
+        return '<div class="log-row box-row pick-row' + (on ? " on" : "") + '" role="checkbox" tabindex="0" aria-checked="' + on + '" aria-label="Select box ' + esc(b.name) + '" data-act="pick-box" data-id="' + esc(b.id) + '">' +
+          '<span class="pick-box" aria-hidden="true">' + (on ? ICON.tick : "") + "</span>" + info + "</div>";
+      }
       var btns = (onBoard ? '<button class="log-btn" data-act="open-dup" data-id="' + esc(b.id) + '">DUPLICATE BOX</button>' : "") +
         (open ? '<button class="log-btn" data-act="open-edit" data-id="' + esc(b.id) + '">EDIT BOX</button>' +
                 '<button class="log-btn del" data-act="open-del" data-id="' + esc(b.id) + '">DELETE BOX</button>'
@@ -779,6 +795,61 @@
         (open ? " · can be changed until " + esc(fmtWhen(b.editableUntil)) : " · read-only since " + esc(fmtWhen(b.editableUntil))) + "</span></span>" +
         '<span class="log-btns">' + btns + "</span></div>";
     }).join("");
+  }
+
+  /* ---------------------------------------------- select + delete boxes -- */
+  /* SELECT (11-02): under "Boxes on this order", tick several boxes and delete them together.
+     Only boxes still inside their 7-day review can be ticked; the server checks every one again
+     and deletes all or none (/api/box-delete-many). Leaving the order or the list ends SELECT. */
+  function pickable(o) { return o.boxes.filter(function (b) { return canChangeBox(withWindow(b)); }); }
+  function pickingFor(o) {
+    var pk = state.picking;
+    if (!pk || !o || pk.orderId !== o.id) return null;
+    var ok = {};
+    pickable(o).forEach(function (b) { ok[b.id] = true; });
+    Object.keys(pk.ids).forEach(function (id) { if (!ok[id]) delete pk.ids[id]; });   // deleted or locked meanwhile
+    return pk;
+  }
+  function pickedBoxes(o) {
+    var pk = pickingFor(o);
+    return pk ? o.boxes.filter(function (b) { return pk.ids[b.id]; }) : [];
+  }
+  function boxLogHtml(o, onBoard, label, rows, emptyText, extra) {
+    var pk = pickingFor(o), can = pickable(o).length, head = "";
+    if (pk) {
+      var all = can && pickedBoxes(o).length === can;
+      head = '<span class="log-tools"><button class="log-btn" data-act="pick-all">' + (all ? "CLEAR ALL" : "SELECT ALL · " + can) + "</button>" +
+        '<button class="log-btn" data-act="pick-cancel">CANCEL</button></span>';
+    } else if (can >= 2) {
+      head = '<span class="log-tools"><button class="log-btn" data-act="pick-start">' + ICON.tick + "SELECT</button></span>";
+    }
+    var bar = "";
+    if (pk) {
+      var picked = pickedBoxes(o), n = picked.length, g = picked.reduce(function (a, b) { return a + (Number(b.qty) || 0); }, 0);
+      bar = '<div class="pick-bar" role="region" aria-label="Selected boxes"><span class="pick-count">' +
+        (n ? "<b>" + n + (n === 1 ? " BOX" : " BOXES") + "</b> SELECTED · " + g + " garments" : "<b>TAP BOXES</b> TO SELECT THEM") + "</span>" +
+        '<button class="save danger pick-del" data-act="pick-delete"' + (n ? "" : " disabled") + ">" + (n ? "DELETE " + n + (n === 1 ? " BOX" : " BOXES") : "DELETE") + "</button></div>";
+    }
+    return '<div class="log' + (pk ? " picking" : "") + '"><div class="log-head"><div class="sec-label">' + label + "</div>" + head + "</div>" +
+      (rows || '<div class="empty" style="margin:0">' + emptyText + "</div>") + bar + extra + "</div>";
+  }
+  function delManySheetHtml(o) {
+    var d = state.delMany;
+    var list = o.boxes.filter(function (b) { return d.ids.indexOf(b.id) >= 0; });
+    if (!list.length) return "";
+    var n = list.length, g = list.reduce(function (a, b) { return a + (Number(b.qty) || 0); }, 0);
+    return '<div class="scrim"><div class="sheet" role="alertdialog" aria-label="Delete boxes">' +
+      '<div class="sheet-head"><div class="sheet-title"><h2 class="danger">DELETE ' + n + (n === 1 ? " BOX" : " BOXES") + " · " + esc(o.num) + "?</h2>" +
+      "<p>" + g + " garments in all</p></div>" +
+      '<button class="x" data-act="close" aria-label="Close"' + (state.saving ? " disabled" : "") + ">" + ICON.x + "</button></div>" +
+      '<div class="del-list">' + list.map(function (b) {
+        return '<div class="del-item"><b>' + esc(b.name) + "</b><span>" + esc(b.type || "—") + " · " + esc(b.sizes || b.qty + " garments") + "</span></div>";
+      }).join("") + "</div>" +
+      '<div class="fin-warn">Deleting removes ' + (n === 1 ? "this box's saved record" : "these " + n + " boxes' saved records") + " from Salesforce, all together or none at all. They will no longer count toward this order's boxes" +
+      (o.finished ? ", and the order's Packaging Count will drop to " + (o.boxes.length - n) : "") + ". Only do this if they were logged by mistake.</div>" +
+      '<div class="save-row"><button class="save alt" data-act="close"' + (state.saving ? " disabled" : "") + ">" + (n === 1 ? "KEEP IT" : "KEEP THEM") + "</button>" +
+      '<button class="save danger' + (state.saving ? " busy" : "") + '" data-act="delmany-confirm"' + (state.saving ? " disabled" : "") + ">" +
+      (state.saving ? '<span class="spin"></span>DELETING…' : "YES, DELETE " + n + (n === 1 ? " BOX" : " BOXES")) + "</button></div></div></div>";
   }
 
   /** Past Orders: one order's saved boxes, for review. No logging, no finishing. */
@@ -797,8 +868,7 @@
       '<div class="stats"><div class="stat"><div class="l">BOXES</div><div class="v">' + o.boxes.length + "</div></div>" +
       '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + (split.extra ? " · +" + split.extra + " extra" : "") + "</small></div></div>" +
       '<div class="stat"><div class="l">EDITABLE</div><div class="v">' + open + "</div></div></div>" +
-      '<div class="log"><div class="sec-label">BOXES ON THIS ORDER (FROM SALESFORCE)</div>' +
-      (boxRowsHtml(o, false) || '<div class="empty" style="margin:0">No boxes on this order any more.</div>') + "</div></main>";
+      boxLogHtml(o, false, "BOXES ON THIS ORDER (FROM SALESFORCE)", boxRowsHtml(o, false), "No boxes on this order any more.", "") + "</main>";
   }
 
   /** Fulfillment order: finished with a box count of 0 and no boxes logged (10-21). */
@@ -1156,9 +1226,9 @@
     if (!state.user || !state.sheet || !o) { $overlay.innerHTML = ""; $overlay.removeAttribute("data-shown"); return; }
     if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); $overlay.removeAttribute("data-shown"); fillMockups($overlay); setupViewer(); return; }
     var html = state.sheet === "box" ? boxSheetHtml(o) : state.sheet === "mis" ? misSheetHtml(o) : state.sheet === "fin" ? finSheetHtml(o)
-      : state.sheet === "dup" ? dupSheetHtml(o) : state.sheet === "del" ? delSheetHtml(o) : "";
+      : state.sheet === "dup" ? dupSheetHtml(o) : state.sheet === "del" ? delSheetHtml(o) : state.sheet === "delmany" && state.delMany ? delManySheetHtml(o) : "";
     // Which form for which order/box: a different one is drawn fresh; the same one is updated in place.
-    var key = state.sheet + ":" + o.id + ":" + (state.box && state.box.requestId || "") + (state.dup ? ":" + state.dup.requestId : "") + (state.del ? ":" + state.del.requestId : "");
+    var key = state.sheet + ":" + o.id + ":" + (state.box && state.box.requestId || "") + (state.dup ? ":" + state.dup.requestId : "") + (state.del ? ":" + state.del.requestId : "") + (state.delMany ? ":" + state.delMany.requestId : "");
     var old = $overlay.firstElementChild;
     if (old && $overlay.getAttribute("data-shown") === key) {
       var tmp = document.createElement("div"); tmp.innerHTML = html;
@@ -1282,12 +1352,12 @@
 
   function send(kind, payload, opts) {
     if (state.saving) return;                 // a second tap does nothing
-    var key = (kind === "edit" || kind === "del") && state.mode === "past" ? "past" : "board";
+    var key = (kind === "edit" || kind === "del" || kind === "delmany") && state.mode === "past" ? "past" : "board";
     if (state.scr[key].s !== "live") { refuseSave(key); return; }
     opts = opts || {};
     state.saving = true; state.pending = { kind: kind, payload: payload, opts: opts };
     state.toast = null; renderToast(); renderOverlay();
-    var path = { box: "/api/boxes", fin: "/api/finish", dup: "/api/duplicate-box", edit: "/api/box-edit", del: "/api/box-delete" }[kind] || "/api/misprints";
+    var path = { box: "/api/boxes", fin: "/api/finish", dup: "/api/duplicate-box", edit: "/api/box-edit", del: "/api/box-delete", delmany: "/api/box-delete-many" }[kind] || "/api/misprints";
     api("POST", path, payload).then(function (r) {
       state.saving = false;
       if (!state.user) return;
@@ -1310,6 +1380,12 @@
         } else if (kind === "del" && o && r.data.deleted) {
           o.boxes = o.boxes.filter(function (x) { return x.id !== r.data.deleted.id; });
           showToast({ kind: "ok", title: "BOX DELETED", body: "“" + r.data.deleted.name + "” is deleted from " + o.num + " in Salesforce. " + (r.data.countNote || "") });
+        } else if (kind === "delmany" && o && r.data.deleted) {
+          var gone = {}; r.data.deleted.forEach(function (x) { gone[x.id] = true; });
+          o.boxes = o.boxes.filter(function (x) { return !gone[x.id]; });
+          var dn = r.data.deleted.length;
+          showToast({ kind: "ok", title: dn + (dn === 1 ? " BOX DELETED" : " BOXES DELETED"), body: r.data.deleted.map(function (x) { return "“" + x.name + "”"; }).join(", ") + (dn === 1 ? " is" : " are") + " deleted from " + o.num + " in Salesforce. " + (r.data.countNote || "") });
+          state.picking = null;
         } else if (kind === "dup" && o && r.data.boxes) {
           Array.prototype.push.apply(o.boxes, r.data.boxes);
           var bx = r.data.boxes, first = bx[0], last = bx[bx.length - 1];
@@ -1335,7 +1411,7 @@
             : mp.extra ? " " + mp.size + " is an extra size (not on the order), so it's in the notes only." : "";
           showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + "." + where + " The print shop has been notified." });
         }
-        state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null; state.del = null;
+        state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null; state.del = null; state.delMany = null;
         if (kind === "box" && opts.andNew && o) {
           // SAVE BOX & NEW: only now that Salesforce has confirmed, open a fresh, blank box.
           state.box = newBox(o); state.sheet = "box";
@@ -1343,8 +1419,8 @@
         renderOverlay(); renderMain(); renderToast();
         reloadAll();                           // pull the real records back from Salesforce, on both views
       } else if (r.status === 0 || (r.data && r.data.error === "unconfirmed") || (r.data && r.data.error === "in_progress")) {
-        state.sheet = null; state.dup = null; state.del = null; renderOverlay();
-        showToast({ kind: "unsure", title: kind === "del" ? "NOT SURE IT DELETED" : "NOT SURE IT SAVED", body: (r.data && r.data.message) || "Check the order before trying again." });
+        state.sheet = null; state.dup = null; state.del = null; state.delMany = null; if (kind === "delmany") state.picking = null; renderOverlay();
+        showToast({ kind: "unsure", title: kind === "del" ? "NOT SURE IT DELETED" : kind === "delmany" ? "NOT SURE THEY DELETED" : "NOT SURE IT SAVED", body: (r.data && r.data.message) || "Check the order before trying again." });
         reloadAll();
       } else if (r.status === 401) {
         // signedOut() already ran
@@ -1353,7 +1429,7 @@
         showToast({ kind: "err", title: "NOT SAVED", body: (r.data && r.data.message) || "Salesforce did not accept it. Nothing was saved.", retry: r.status >= 500 || r.status === 409 });
         if (r.data && /^(order_not_in_production|review_expired|box_not_found|changed|order_not_found)$/.test(r.data.error)) {
           // The box can't be changed any more (or changed under us): close, keep it visible, re-read from Salesforce.
-          state.sheet = null; state.del = null; renderOverlay(); reloadAll();
+          state.sheet = null; state.del = null; state.delMany = null; renderOverlay(); reloadAll();
           state.toast.title = r.data.error === "review_expired" ? "REVIEW PERIOD ENDED" : state.toast.title; state.toast.retry = false; renderToast();
         }
       }
@@ -1477,6 +1553,7 @@
     pin: function (el) { pinKey(el.getAttribute("data-k")); },
     reload: function () { foregroundLoad(state.mode === "past" ? loadPast : loadOrders); },
     pick: function (el) {
+      state.picking = null;
       if (state.mode === "past") state.pastSelId = el.getAttribute("data-id"); else state.selId = el.getAttribute("data-id");
       state.view = "detail"; renderMain();
     },
@@ -1486,6 +1563,7 @@
       if (renderPending) renderMain();
     },
     mode: function (el) {
+      state.picking = null;
       var m = el.getAttribute("data-m"); if (m === state.mode) return;
       state.mode = m; state.view = "list"; state.q = ""; renderMain(); paintConn();
       // A list's FIRST load gets the big loader; one already on screen refreshes quietly (corner icon).
@@ -1521,6 +1599,31 @@
       state.del = { boxId: b.id, requestId: newRequestId() };
       state.sheet = "del"; state.toast = null; renderToast(); renderOverlay();
     },
+    "pick-start": function () {
+      var o = current(); if (!o || state.saving) return;
+      state.picking = { orderId: o.id, ids: {} }; renderMain();
+    },
+    "pick-cancel": function () { state.picking = null; renderMain(); },
+    "pick-all": function () {
+      var o = current(), pk = pickingFor(o); if (!pk) return;
+      var can = pickable(o), all = can.length && pickedBoxes(o).length === can.length;
+      pk.ids = {}; if (!all) can.forEach(function (b) { pk.ids[b.id] = true; });
+      renderMain();
+    },
+    "pick-box": function (el) {
+      var o = current(), pk = pickingFor(o), id = el.getAttribute("data-id"); if (!pk || !id) return;
+      if (pk.ids[id]) delete pk.ids[id]; else pk.ids[id] = true;
+      renderMain();
+    },
+    "pick-delete": function () {
+      var o = current(), picked = pickedBoxes(o); if (!o || !picked.length) return;
+      state.delMany = { ids: picked.map(function (b) { return b.id; }), requestId: newRequestId() };
+      state.sheet = "delmany"; state.toast = null; renderToast(); renderOverlay();
+    },
+    "delmany-confirm": function () {
+      var o = current(), d = state.delMany; if (!o || !d) return;
+      send("delmany", { orderId: o.id, boxIds: d.ids, requestId: d.requestId });
+    },
     "del-confirm": function () {
       var o = current(), d = state.del; if (!o || !d) return;
       send("del", { orderId: o.id, boxId: d.boxId, requestId: d.requestId });
@@ -1538,7 +1641,7 @@
       state.mis = { line: 0, size: null, qty: 1, reason: null, note: "", requestId: newRequestId() };
       state.sheet = "mis"; state.toast = null; renderToast(); renderOverlay();
     },
-    close: function () { if (state.saving) return; state.sheet = null; renderOverlay(); },
+    close: function () { if (state.saving) return; state.sheet = null; state.delMany = null; renderOverlay(); },
     "box-type": function (el) { state.box.type = el.getAttribute("data-v"); renderOverlay(); },
     "box-cell": function (el) { state.box.sel = el.getAttribute("data-k"); renderOverlay(); },
     "add-more": function (el) {
@@ -1663,7 +1766,9 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && state.help) { closeHelp(); return; }
-    if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; renderOverlay(); }
+    if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; state.delMany = null; renderOverlay(); return; }
+    if (e.key === "Escape" && state.picking && !state.saving) { state.picking = null; renderMain(); return; }
+    if ((e.key === " " || e.key === "Enter") && e.target && e.target.getAttribute && e.target.getAttribute("data-act") === "pick-box") { e.preventDefault(); handlers["pick-box"](e.target); }
   });
   document.getElementById("help-btn").addEventListener("click", function () { if (state.help) closeHelp(); else openHelp(); });
   document.getElementById("zoom-in").addEventListener("click", function () { stepZoom(1); });

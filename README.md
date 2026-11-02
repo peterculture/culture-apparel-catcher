@@ -315,3 +315,14 @@ The Catch's differences: `morph()` in `app.js` keeps the 3D classes when a form 
 no pop-up mid-press); the press animation runs only while a finger is down, so the order list rebuilt every
 refresh doesn't animate; a button placed with its own CSS transform (the search ×) stays flat.
 To keep one button flat: add `data-no3d` to it or a parent.
+
+## Select + delete several boxes (11-02)
+
+Under **Boxes on this order** (In Production and Past Orders), **SELECT** appears when 2 or more boxes can still
+be changed. Each open box becomes a tick box (locked ones can't be ticked); **SELECT ALL** / **CLEAR ALL**,
+**CANCEL**, and a bar with **DELETE N BOXES**, then a confirm dialog listing them.
+
+`/api/box-delete-many` re-reads the order and checks every ticked box (still on that order, still inside its
+7-day review on the server's clock). If any one fails, nothing is deleted. Then one all-or-nothing Salesforce
+call (`composite/sobjects` DELETE, `allOrNone=true`, at most 100) deletes them, into the Recycle Bin. A finished
+order's Packaging Count follows, as with a single delete. Changing order or list ends SELECT.

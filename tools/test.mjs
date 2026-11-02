@@ -28,6 +28,7 @@ const past = await mod("past-orders");
 const bedit = await mod("box-edit");
 const bdel = await mod("box-delete");
 const bug = await mod("bug-report");
+const bdelm = await mod("box-delete-many");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -139,6 +140,16 @@ globalThis.fetch = async (url, init = {}) => {
     const b = JSON.parse(init.body); const id = "a0X" + (db.boxes.length + 1);
     db.boxes.push(Object.assign({ Id: id, CreatedDate: new Date().toISOString(), CreatedBy: { Name: "Catcher App" } }, b));
     return res(201, { id, success: true, errors: [] });
+  }
+  if (u.pathname.endsWith("/composite/sobjects") && method === "DELETE") {
+    const ids = (u.searchParams.get("ids") || "").split(",").filter(Boolean);
+    const all = u.searchParams.get("allOrNone") === "true";
+    const bad = ids.map((id) => behave.lockId === id || !db.boxes.some((b) => b.Id === id));
+    if (all && bad.some(Boolean)) {
+      return res(200, ids.map((id, i) => ({ id, success: false, errors: [bad[i] ? { statusCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "Box is locked" } : { statusCode: "ALL_OR_NONE_OPERATION_ROLLED_BACK", message: "rolled back" }] })));
+    }
+    db.boxes = db.boxes.filter((b) => !ids.includes(b.Id));
+    return res(200, ids.map((id) => ({ id, success: true, errors: [] })));
   }
   if (u.pathname.endsWith("/composite/sobjects") && method === "POST") {
     if (behave.dupTimeout) throw new Error("timeout");
@@ -1028,6 +1039,48 @@ await test("3D buttons: The Forge's layer, copied (11-02)", async () => {
   let threw = false; try { new Function(L)(); } catch (e) { threw = true; }
   globalThis.window = g; globalThis.document = d;
   ok(!threw, "loads in a stub page without throwing");
+});
+
+await test("Select + delete several boxes: all or nothing, 7-day rule on every box (11-02)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const O = "801000000000001AAA", DAY = 86400000, ago = (ms) => new Date(Date.now() - ms).toISOString();
+  const mk = (id, name, createdAgo) => ({ Id: id, Order__c: O, Name: name, Packaging_Type__c: "Standard Culture Box", Packaging_Quantity__c: 10,
+    Quantity_Size_Counted__c: "S 4 · M 6 = 10", CreatedDate: ago(createdAgo), LastModifiedDate: ago(createdAgo), CreatedBy: { Name: "Catcher App" } });
+  db.boxes = [mk("a0X000000000031AAA", "Tees 1", DAY), mk("a0X000000000032AAA", "Tees 2", DAY), mk("a0X000000000033AAA", "Tees 3", 8 * DAY), mk("a0X000000000034AAA", "Tees 4", 3600000)];
+  db.orders[0].Packaging_Count__c = 4;
+  const delm = (boxIds, id, orderId = O) => bdelm.onRequestPost({ request: req("POST", "/api/box-delete-many", { orderId, boxIds, requestId: id }, cookie), env });
+  let r = await delm(["a0X000000000031AAA", "a0X000000000033AAA"], "req-dm000001"); let d = await r.json();
+  ok(r.status === 403 && d.error === "review_expired" && /Tees 3/.test(d.message) && db.boxes.length === 4 && !posts("/composite/sobjects").length, "one ticked box past 7 days -> refused by name, NOTHING deleted, Salesforce not asked");
+  r = await delm(["a0X000000000031AAA", "a0X000000000099AAA"], "req-dm000002"); d = await r.json();
+  ok(r.status === 404 && db.boxes.length === 4, "one ticked box gone -> nothing deleted");
+  r = await delm([], "req-dm000003");
+  ok(r.status === 400, "nothing ticked -> 400");
+  r = await delm(Array.from({ length: 101 }, (_, i) => "a0X" + String(100 + i).padStart(15, "0")), "req-dm000004"); d = await r.json();
+  ok(r.status === 400 && d.error === "too_many", "more than 100 -> 400");
+  behave.lockId = "a0X000000000032AAA";
+  r = await delm(["a0X000000000031AAA", "a0X000000000032AAA"], "req-dm000005"); d = await r.json();
+  ok(r.status === 422 && /Box is locked/.test(d.message) && /None were deleted/.test(d.message) && db.boxes.length === 4, "Salesforce refuses one -> all rolled back, its reason shown, all still there");
+  behave.lockId = null;
+  r = await delm(["a0X000000000031AAA", "a0X000000000032AAA", "a0X000000000031AAA"], "req-dm000006"); d = await r.json();
+  ok(r.status === 200 && d.deleted.length === 2 && db.boxes.map((b) => b.Id).join() === "a0X000000000033AAA,a0X000000000034AAA", "two ticked (one sent twice) -> exactly those two deleted");
+  const call = posts("/composite/sobjects").pop();
+  ok(call.method === "DELETE" && /allOrNone=true/.test(call.url) && /ids=a0X000000000031AAA,a0X000000000032AAA$/.test(call.url), "one all-or-nothing DELETE call for both");
+  ok(db.orders[0].Packaging_Count__c === 2 && /now 2/.test(d.countNote), "finished order's Packaging Count follows: 4 -> 2");
+  r = await delm(["a0X000000000031AAA", "a0X000000000032AAA"], "req-dm000006");
+  ok(r.status === 200 && db.boxes.length === 2 && posts("/composite/sobjects").length === 2, "double tap: same answer, nothing else deleted");
+  r = await delm(["a0X000000000034AAA"], "req-dm000007", "801000000000002AAA");
+  ok(r.status === 404 && db.boxes.length === 2, "box id + wrong order -> refused");
+  r = await bdelm.onRequestPost({ request: req("POST", "/api/box-delete-many", { orderId: O, boxIds: ["a0X000000000034AAA"], requestId: "req-dm000008" }), env });
+  ok(r.status === 401, "needs a sign-in");
+});
+
+await test("Select + delete: the tablet side (11-02)", async () => {
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  ok(/data-act="pick-start"/.test(js) && /can >= 2/.test(js), "SELECT shows when 2 or more boxes can still be changed");
+  ok(/role="checkbox"/.test(js) && /data-act="pick-box"/.test(js) && /LOCKED · 7-DAY REVIEW ENDED/.test(js), "each open box is a tick box; locked boxes can't be ticked");
+  ok(/data-act="pick-all"/.test(js) && /data-act="pick-cancel"/.test(js) && /data-act="pick-delete"/.test(js), "Select all / Cancel / Delete N");
+  ok(/delmany: "\/api\/box-delete-many"/.test(js) && /data-act="delmany-confirm"/.test(js), "a confirm dialog, then one request to /api/box-delete-many");
+  ok(/pick: function \(el\) \{\s*state\.picking = null;/.test(js) && /mode: function \(el\) \{\s*state\.picking = null;/.test(js), "changing order or list ends SELECT");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
