@@ -12,7 +12,7 @@
   --danger-text: #E8A89F; --danger-bg: #2A100D;
   --method-sp: #4E9A6A;
   --z: 1;                       /* screen size: set by the – / + buttons */
-  --hdr: 78px;
+  --hdr: 86px;                 /* header 84px + its 2px line (roomier layout, 11-02; was 78px) */
 }
 * { box-sizing: border-box; }
 html { font-size: calc(16px * var(--z)); -webkit-text-size-adjust: 100%;
@@ -25,7 +25,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 .oswald { font-family: 'Oswald', sans-serif; }
 
 /* ---------- header: fixed pixel sizes, never scaled, so the zoom buttons stay put ---------- */
-.hdr { position: fixed; inset: 0 0 auto 0; height: 76px; z-index: 50; display: flex; align-items: center; gap: 16px; padding: 0 16px 0 0;
+.hdr { position: fixed; inset: 0 0 auto 0; height: 84px; z-index: 50; display: flex; align-items: center; gap: 20px; padding: 0 28px 0 0;
   background: linear-gradient(90deg,#0E0F12,#15161A 55%,#0E0F12); border-bottom: 2px solid #7A1A15; font-size: 16px; }
 .hdr-logo { align-self: stretch; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: #0B0C0E; border-right: 1px solid #1F2126; flex-shrink: 0; }
 .hdr-brand { display: block; height: 52px; width: auto; }   /* The Catch web logo (brand/catch-logo-web.png) */
@@ -48,7 +48,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 @media (max-width: 900px) { .hdr-clock, .who-name { display: none; } .hdr-brand { height: 42px; } }
 
 /* ---------- body ---------- */
-.app { position: fixed; top: 78px; left: 0; right: 0; bottom: 0; display: flex; }
+.app { position: fixed; top: var(--hdr); left: 0; right: 0; bottom: 0; display: flex; }
 .list { width: 24rem; flex-shrink: 0; height: 100%; display: flex; flex-direction: column; border-right: 1px solid var(--border-card); background: var(--surface-raised); }
 .narrow .list { width: 100%; border-right: none; }
 .narrow.view-detail .list, .narrow.view-list .detail { display: none; }
@@ -128,7 +128,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 
 /* ---------- sheets ---------- */
 #overlay:empty { display: none; }
-.scrim { position: fixed; inset: 78px 0 0 0; background: rgba(4,4,6,.75); display: flex; align-items: center; justify-content: center; padding: 1.1rem; z-index: 60; }
+.scrim { position: fixed; inset: var(--hdr) 0 0 0; background: rgba(4,4,6,.75); display: flex; align-items: center; justify-content: center; padding: 1.1rem; z-index: 60; }
 .sheet { width: min(52rem, 100%); max-height: 100%; overflow-y: auto; background: var(--surface-panel); border: 1px solid var(--border-strong); border-radius: 1.4rem; padding: 1.4rem 1.5rem; display: flex; flex-direction: column; gap: 1.1rem; }
 .sheet-head { display: flex; align-items: center; gap: .9rem; }
 .sheet-title { flex: 1; min-width: 0; }
@@ -166,7 +166,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- mockup viewer ---------- */
-.viewer { position: fixed; inset: 78px 0 0 0; z-index: 70; background: rgba(4,4,6,.96); display: flex; flex-direction: column; padding: 1.1rem; gap: .9rem; }
+.viewer { position: fixed; inset: var(--hdr) 0 0 0; z-index: 70; background: rgba(4,4,6,.96); display: flex; flex-direction: column; padding: 1.1rem; gap: .9rem; }
 .viewer-bar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .viewer-bar .t { flex: 1; min-width: 12rem; }
 .viewer-bar .t b { display: block; font: 700 1.6rem/1 'Oswald'; letter-spacing: .04em; }
@@ -216,7 +216,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--warn-soft);
 .narrow-only { display: none !important; }
 .narrow .narrow-only { display: flex !important; }
 .notes { font: 500 1rem/1.45 'Archivo'; color: var(--text-secondary); background: var(--warn-bg); border: 1px solid #5E4214; border-radius: .75rem; padding: .8rem 1rem; white-space: pre-wrap; }
-.toast.top { top: calc(78px + 3rem); bottom: auto; }   /* clear of the corner loading icon */
+.toast.top { top: calc(var(--hdr) + 3rem); bottom: auto; }   /* clear of the corner loading icon */
 .who[hidden] { display: none; }
 
 /* ---------- mockups: hidden until the picture is ready ---------- */
@@ -492,3 +492,96 @@ html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-conten
 .total-bar .copies.sel { border-color: var(--accent-hot); box-shadow: inset 0 0 0 1px var(--accent-hot); }
 .total-bar .copies.bad .v { color: var(--danger-text); }
 @media (max-width: 700px) { .total-bar { flex-wrap: wrap; } .total-bar .copies { min-width: 8.5rem; } }
+
+
+/* ===========================================================================
+ * ROOMIER LAYOUT (Anthony 11-02, from the "The Catch: Roomier Layout" mockup)
+ * More space, fewer boxes-inside-boxes: wider margins, bigger gaps between sections,
+ * the size counts / stats / box rows sit on the background instead of in bordered
+ * panels, the header loses the photo strip and the order list loses the photo banner
+ * (the season stays as a small chip). Everything is here, after the original rules,
+ * so the whole change can be taken back by deleting this block (and the 4 --hdr lines).
+ * Sizes stay in rem, so the − / + screen-size buttons still scale it all.
+ * ========================================================================= */
+
+/* header: no photo strip, more room between the controls */
+.ca-hdr-tag { display: none; }
+.hdr-logo { padding: 0 28px; }
+.hdr-brand { height: 48px; }
+.hdr-right { gap: 20px; }
+.hdr-clock { padding-right: 20px; }
+.zoom button, .who { min-height: 56px; height: 56px; }
+.help-btn { width: 56px; height: 56px; }
+@media (max-width: 900px) { .hdr-logo { padding: 0 20px; } .hdr { gap: 14px; padding-right: 20px; } .hdr-right { gap: 14px; } }
+
+/* order list */
+.mode-tabs { gap: .75rem; margin: 0 1.75rem .25rem; padding-top: 1.75rem; }
+.mode-tabs button { min-height: 3.75rem; }
+.list-head { padding: 1.5rem 1.75rem 1.25rem; }
+.list-title h1 { font-size: 1.05rem; color: var(--text-secondary); }
+.list-count { font-size: 1.05rem; }
+.list-sub { margin-top: .6rem; }
+html[data-ca-season] .ca-season-head { background-image: none; border-left: 0; border-bottom: 0; }
+html[data-ca-season] .ca-season-head h1, html[data-ca-season] .ca-season-head .list-sub { text-shadow: none; }
+html[data-ca-season] .ca-season-head .season-chip { margin-top: 1rem; color: var(--text-secondary); }
+.ca-season-head .season-sep, .ca-season-head .ca-season-range { display: none; }
+.ca-season-head .season-fx { margin-left: .25rem; background: var(--surface-card); border-color: var(--border-strong); color: var(--warn-soft); }
+.search { margin: 0 1.75rem 1.25rem; }
+.search input { min-height: 3.5rem; border-width: 1px; border-radius: .9rem; }
+.search-none { margin: 0 1.75rem; }
+.cards { padding: .25rem 1.75rem 2rem; gap: 1rem; }
+.card { padding: 1.375rem; gap: 1.125rem; align-items: flex-start; }
+.card-body { gap: .55rem; }
+.thumb { width: 3.5rem; height: 3.5rem; }
+.empty { margin: 1.75rem; }
+
+/* one order */
+.detail { padding: 2.5rem 3rem 3rem; gap: 2.25rem; }
+.narrow .detail { padding: 2rem 2.5rem 3rem; gap: 2rem; }
+.d-top { gap: 1.75rem; align-items: center; }
+.mock { width: 8rem; height: 8rem; border-radius: 1.1rem; border-color: var(--border); }
+.d-id { gap: .75rem; }
+.d-num { font-size: 3.6rem; line-height: .95; }
+.panel { background: none; border: 0; padding: 0; gap: 1.4rem; }
+.line-head { font-size: 1rem; }
+.line-head .tot { font-size: .9rem; color: var(--text-muted); letter-spacing: .08em; }
+.sizes { grid-template-columns: repeat(auto-fill, minmax(4.9rem, 1fr)); gap: .75rem; margin-top: .75rem; }
+.size { border: 0; background: var(--surface-card); border-radius: .9rem; padding: .95rem 0 .9rem; }
+.size .q { font-size: 1.5rem; margin-top: .5rem; }
+.detail .stats { display: flex; flex-wrap: wrap; gap: 1.5rem 3.5rem; }
+.detail .stat { background: none; border: 0; padding: 0; }
+.detail .stat .v { font-size: 2.5rem; margin-top: .6rem; }
+.actions { gap: 1.25rem; }
+.big { min-height: 5.75rem; border-radius: 1.15rem; font-size: 1.4rem; letter-spacing: .12em; }
+.big-done, .fin-row .big, .big-ful { min-height: 5rem; }
+.fin-row { gap: 1.25rem; }
+.moved-banner, .review-banner { padding: 1.25rem 1.5rem; }
+.log { gap: 1rem; }
+.log-head { min-height: 3.5rem; }
+.log-row { border: 0; border-radius: 1rem; padding: 1.4rem 1.5rem; gap: 1.25rem; }
+.box-row .log-text { gap: .65rem; }
+.log-main { gap: .6rem 1.75rem; }
+.log-icon { width: 2.5rem; height: 2.5rem; border-radius: .65rem; font-size: 1rem; }
+.log-btns { gap: .75rem; }
+.log-btn { min-height: 3.25rem; padding: 0 1.15rem; }
+.notes { margin-top: .25rem; }
+
+/* forms (Log Box, Misprint, Finish, Duplicate, Delete, Help) */
+.scrim { padding: 1rem; }
+.sheet { padding: 2.25rem 2.5rem; gap: 1.5rem; border-radius: 1.5rem; }
+.sheet.wide { width: min(68rem, 100%); }
+.sheet-title p { margin-top: .55rem; }
+.chips { gap: .75rem; margin-top: .75rem; }
+.row2 { gap: 2.5rem; }
+.grow { gap: 1rem; }
+.gl { gap: .65rem; }
+.gl + .gl { margin-top: .9rem; padding-top: 0; border-top: 0; }
+.cells { gap: .75rem; }
+.pad { gap: .75rem; }
+.pad-wrap { gap: .75rem; }
+.quick { gap: .75rem; }
+.total-bar { padding: 1rem 1.5rem; gap: 1.75rem; border-radius: 1.1rem; }
+.save-row { gap: 1rem; }
+.fin-sum { gap: 1.25rem; }
+.dup-src { padding: 1.1rem 1.35rem; gap: .8rem; }
+.pick-bar { padding: 1rem 1.15rem; }

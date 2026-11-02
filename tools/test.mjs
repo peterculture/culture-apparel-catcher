@@ -1015,7 +1015,8 @@ await test("Help: the page has a ? button and a pop-up, no tab (11-02)", async (
   ok(/"\/api\/bug-report"/.test(js) && (js.match(/<textarea id="help-what"/g) || []).length === 1, "one textarea, posts to /api/bug-report");
   ok(/Found a bug\?<\/em> Report it here:/.test(js) && /Thanks, report sent\./.test(js), "question and thank-you wording");
   ok(/state\.help = null; helpDraft = ""/.test(js), "sign-out clears the pop-up and what was typed");
-  ok(!/^\s*(html|body|:root)\b/m.test(css.slice(css.indexOf("/* ---- Help (11-02)"))), "help styles don't touch html, body or :root");
+  const hs = css.indexOf("/* ---- Help (11-02)"), he = css.indexOf("\n/* ", hs + 10);
+  ok(!/^\s*(html|body|:root)\b/m.test(css.slice(hs, he > 0 ? he : undefined)), "help styles don't touch html, body or :root");
   let parsed = true; try { new Function(js); } catch (e) { parsed = false; } ok(parsed, "app.js parses");
 });
 
