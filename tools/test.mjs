@@ -1113,6 +1113,29 @@ await test("Box names: Lane Seven styles, name words, then Product Family (11-02
   ok(calls.some((c) => /Product2\.Family/.test(decodeURIComponent(c.url))) && l[0].lines[0].family === "T-Shirts", "the server reads Product2.Family and sends it with each garment line");
 });
 
+await test("Boxes like this: Log Box saves N identical boxes at once, all or none (11-02)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const O = "801000000000001AAA";
+  const post = (body) => boxes.onRequestPost({ request: req("POST", "/api/boxes", Object.assign({ orderId: O, type: "Standard Culture Box", counts: [{ line: 0, size: "L", qty: 5 }], name: "Tees 2" }, body), cookie), env });
+  const n0 = db.boxes.length;
+  let r = await post({ copies: 101, requestId: "req-cp000001" }); let d = await r.json();
+  ok(r.status === 400 && d.error === "bad_copies" && db.boxes.length === n0, "101 -> refused, nothing saved");
+  r = await post({ copies: 2.5, requestId: "req-cp000002" });
+  ok(r.status === 400, "not a whole number -> refused");
+  r = await post({ copies: 3, requestId: "req-cp000003" }); d = await r.json();
+  ok(r.status === 201 && d.created === 3 && d.boxes.length === 3 && db.boxes.length === n0 + 3, "copies 3 -> 3 new boxes");
+  ok(d.boxes.map((b) => b.name).join() === "Tees 2,Tees 3,Tees 4", "numbered on from the boxes already there -> " + d.boxes.map((b) => b.name).join());
+  ok(db.boxes.slice(-3).every((b) => b.Packaging_Quantity__c === 5 && b.Quantity_Size_Counted__c === "L 5 = 5" && b.CountedBy__c === "Maria R."), "each has the same type, sizes and total, credited to the catcher");
+  const c = posts("/composite/sobjects").pop();
+  ok(c && JSON.parse(c.body).allOrNone === true && JSON.parse(c.body).records.length === 3, "one all-or-nothing request");
+  r = await post({ copies: 3, requestId: "req-cp000003" });
+  ok(r.status === 201 && db.boxes.length === n0 + 3, "double tap: same answer, nothing new");
+  r = await post({ requestId: "req-cp000004" }); d = await r.json();
+  ok(r.status === 201 && d.box && !d.boxes && db.boxes.length === n0 + 4 && !posts("/composite/sobjects").some((x) => x === undefined), "no copies -> one box, as before");
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  ok(/data-k="copies"/.test(js) && /BOXES LIKE THIS/.test(js) && /payload\.copies = n/.test(js) && /copies: "1"/.test(js), "the form has the tile, sends copies only when more than 1, and a new box starts at 1");
+});
+
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
   reset(); const env = ENV(); const c = await signIn(env, "4821");
   behave.noDeliveryField = true;

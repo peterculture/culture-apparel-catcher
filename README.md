@@ -340,3 +340,11 @@ were counted on, in this order (`shortFor()` in `app.js`):
 4. Otherwise "Tees".
 Duplicate Box keeps the source box's word. `tools/rename-lane-seven-boxes.apex` fixed the Lane Seven boxes
 saved as "Tees" before this (21495-1, 20847-7, 21582).
+
+## Boxes like this (11-02)
+
+Log Box has a **BOXES LIKE THIS ×1** tile next to the total. Tap it and type a number (1–100) on the keypad;
+saving then makes that many identical boxes at once ("SAVE 5 BOXES · 12 EACH · 60 GARMENTS"), numbered on
+("Crewnecks 4 to Crewnecks 8"). `/api/boxes` takes `copies` (2–100) and saves them in ONE all-or-nothing
+Salesforce request, the same way as Duplicate Box. A warning shows (doesn't block) when N boxes add up to more
+than the order has left in a size. Every new box form starts at ×1, also after SAVE & NEW.

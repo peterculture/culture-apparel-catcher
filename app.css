@@ -480,3 +480,15 @@ html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-conten
 .del-item { display: flex; flex-direction: column; gap: .2rem; padding: .65rem .85rem; border-radius: .7rem; background: var(--surface-card); border: 1px solid var(--border-card); }
 .del-item b { font: 700 1rem/1.1 'Oswald'; letter-spacing: .05em; }
 .del-item span { font: 500 .88rem/1.35 'Archivo'; color: var(--text-tertiary); }
+
+/* ---- Boxes like this (11-02): save the same box N times from Log Box. ---- */
+.total-bar .copies { display: flex; flex-direction: column; align-items: center; gap: .3rem; min-width: 10.5rem; min-height: 5rem; padding: .55rem 1rem;
+  border-radius: .9rem; border: 2px solid var(--border-strong); background: var(--surface-card); color: var(--text-primary); }
+.total-bar .copies .l { font: 600 .72rem/1 'Oswald'; letter-spacing: .14em; color: var(--text-muted); }
+.total-bar .copies .v { font: 700 1.9rem/1 'Oswald'; letter-spacing: .02em; }
+.total-bar .copies .h { font: 500 .7rem/1 'Archivo'; color: var(--text-ghost); }
+.total-bar .copies.has { border-color: var(--warn); background: var(--warn-bg); }
+.total-bar .copies.has .v { color: var(--warn-soft); }
+.total-bar .copies.sel { border-color: var(--accent-hot); box-shadow: inset 0 0 0 1px var(--accent-hot); }
+.total-bar .copies.bad .v { color: var(--danger-text); }
+@media (max-width: 700px) { .total-bar { flex-wrap: wrap; } .total-bar .copies { min-width: 8.5rem; } }

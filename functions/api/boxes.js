@@ -12,12 +12,18 @@
  * One box may hold several garments from the order. Number of boxes = number of records.
  * (An older tablet that still sends only { qty } is accepted, saved without sizes.)
  *
- * Answers 201 only after Salesforce has confirmed the record exists.
+ * BOXES LIKE THIS (11-02)  { ..., copies: 2-100 }: the same box is saved `copies` times at once, so a
+ * catcher doesn't have to save one and then Duplicate it. Same rules as Duplicate Box: every record in ONE
+ * Salesforce request with allOrNone (all are created or none), numbered on from the boxes already on the
+ * order ("Crewnecks 4", "Crewnecks 5", ...), each credited to the catcher. copies 1 (or left out) = as before.
+ *
+ * Answers 201 only after Salesforce has confirmed the record(s) exist.
  */
 import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
-import { boxFields, countsShapeError, checkCounts } from "./_boxes.js";
+import { boxFields, countsShapeError, checkCounts, garmentWord, nextNames } from "./_boxes.js";
+import { MAX_DUPLICATES } from "./duplicate-box.js";
 
 export async function onRequestPost({ request, env }) {
   const auth = await requireUser(request, env);
@@ -32,6 +38,7 @@ export async function onRequestPost({ request, env }) {
     let qty = Number(body.qty);
     const name = String(body.name || "").replace(/\s+/g, " ").trim().slice(0, 80);
     const requestId = String(body.requestId || "");
+    const copies = body.copies === undefined ? 1 : body.copies;
 
     if (!SF_ID.test(orderId)) return json({ error: "bad_order_id", message: "That order is not valid. Refresh the list." }, 400);
     if (counts) {
@@ -40,6 +47,9 @@ export async function onRequestPost({ request, env }) {
       qty = counts.reduce((a, c) => a + c.qty, 0);
     }
     if (!Number.isInteger(qty) || qty < 1 || qty > 9999) return json({ error: "bad_qty", message: "Enter how many garments are in the box (1 to 9999)." }, 400);
+    if (!Number.isInteger(copies) || copies < 1 || copies > MAX_DUPLICATES) {
+      return json({ error: "bad_copies", message: `Boxes like this: enter a whole number from 1 to ${MAX_DUPLICATES}.` }, 400);
+    }
     if (!REQ_ID.test(requestId)) return json({ error: "bad_request", message: "Refresh the page and try again." }, 400);
 
     return await withRequestId(env, requestId, 201, async () => {
@@ -60,6 +70,8 @@ export async function onRequestPost({ request, env }) {
       if (checked.error) return json({ error: checked.error, message: checked.message }, 400);
       ({ clean, breakdown } = checked);
     }
+
+    if (copies > 1) return await saveMany({ env, auth, order, requestId, type, qty, breakdown, clean, word: garmentWord(boxName), copies });
 
     const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/Order_Packaging__c`, {
       method: "POST",
@@ -86,4 +98,37 @@ export async function onRequestPost({ request, env }) {
   } catch (err) {
     return errorResponse(err);
   }
+}
+
+/** BOXES LIKE THIS: `copies` identical boxes in one all-or-nothing request (same as Duplicate Box). */
+async function saveMany({ env, auth, order, requestId, type, qty, breakdown, clean, word, copies }) {
+  const names = nextNames(order.boxes, word, copies);
+  const records = names.map((name) => Object.assign({ attributes: { type: "Order_Packaging__c" } },
+    boxFields({ orderId: order.id, name, type, qty, breakdown, countedBy: auth.user.name })));
+  const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/composite/sobjects`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allOrNone: true, records }),
+  });
+  const data = await resp.json().catch(() => null);
+  const results = Array.isArray(data) ? data : [];
+  const at = new Date().toISOString();
+  const made = [];
+  results.forEach((r, i) => { if (r && r.success && r.id && SF_ID.test(r.id)) made.push({ id: r.id, name: names[i], type, qty, sizes: breakdown, counts: clean, by: auth.user.name, at }); });
+  if (resp.status !== 200 || made.length !== copies) {
+    const firstErr = results.map((r) => r && r.errors && r.errors[0]).find((e) => e && e.message && e.statusCode !== "ALL_OR_NONE_OPERATION_ROLLED_BACK");
+    const why = (firstErr && firstErr.message) || sfMessage(data) || "";
+    console.error("boxes-like-this failed", resp.status, made.length, "of", copies, why);
+    if (made.length) {
+      // Shouldn't happen with allOrNone, but if Salesforce ever reports it, say exactly what exists.
+      const partial = { ok: false, error: "partial", created: made.length, failed: copies - made.length, boxes: made,
+        message: `${made.length} of ${copies} boxes were saved; ${copies - made.length} were not` + (why ? `: "${why}"` : ".") + " Nothing was retried." };
+      await rememberResult(env, requestId, partial);
+      return json(partial, 207);
+    }
+    throw new SfError("save_failed", resp.status >= 500 ? 502 : 422,
+      "Salesforce did not save the boxes" + (why ? `: "${why}"` : ".") + ` None of the ${copies} were saved.`);
+  }
+  const result = { ok: true, box: made[0], boxes: made, created: copies, orderId: order.id,
+    boxCount: order.boxes.length + copies, boxed: order.boxes.reduce((a, b) => a + b.qty, 0) + qty * copies };
+  await rememberResult(env, requestId, result);
+  return json(result, 201);
 }

@@ -1033,6 +1033,25 @@
   function sizeLeft(s) {
     return s.qty - (s.boxed || 0);
   }
+  /* BOXES LIKE THIS (11-02): how many identical boxes Log Box saves at once (1-100, default 1).
+     Typed on the same keypad: tap the tile, then the digits. 0 = not a valid number yet. */
+  var MAX_COPIES = 100;
+  function copiesN(b) {
+    var v = String(b && b.copies != null ? b.copies : "1");
+    if (!/^[0-9]{1,3}$/.test(v)) return 0;
+    var n = parseInt(v, 10);
+    return n >= 1 && n <= MAX_COPIES ? n : 0;
+  }
+  /** Sizes this many boxes would over-fill: [{ size, need, left }]. Extras are not on the order, so never "over". */
+  function copiesOver(o, b, n) {
+    var out = [];
+    boxCounts(o, b).forEach(function (c) {
+      if (c.extra) return;
+      var s = o.lines[c.line].sizes.filter(function (x) { return x.size === c.size; })[0];
+      if (s && c.qty * n > sizeLeft(s)) out.push({ size: c.size, need: c.qty * n, left: Math.max(0, sizeLeft(s)) });
+    });
+    return out;
+  }
 
   function boxSheetHtml(o) {
     var b = state.box, total = boxTotal(o, b), ed = b.edit;
@@ -1085,10 +1104,21 @@
     var selSize = selLine ? selLine.sizes.filter(function (s) { return s.size === selName; })[0] : null;
     var selExtra = !selSize && selLine && extrasFor(o, b, Number(selParts[0])).indexOf(selName) >= 0;
     var restN = selSize ? Math.max(0, sizeLeft(selSize) + (orig[b.sel] || 0)) : 0;
-    var ready = total > 0 && total <= 9999 && !!b.type && (!ed || !!b.word);
-    var label = state.saving ? "SAVING TO SALESFORCE…" : !ready ? (!b.type ? "PICK A PACKAGING TYPE" : "COUNT AT LEAST ONE SIZE")
-      : ed ? "SAVE CHANGES · " + total + " GARMENTS" : "SAVE BOX " + (o.boxes.length + 1) + " · " + total + " GARMENTS";
+    var selCopies = !ed && b.sel === "copies", n = ed ? 1 : copiesN(b);
+    var ready = total > 0 && total <= 9999 && !!b.type && (!ed || !!b.word) && n > 0;
+    var label = state.saving ? "SAVING TO SALESFORCE…" : !ready ? (!b.type ? "PICK A PACKAGING TYPE" : !total ? "COUNT AT LEAST ONE SIZE" : !n ? "BOXES LIKE THIS: 1 TO " + MAX_COPIES : "COUNT AT LEAST ONE SIZE")
+      : ed ? "SAVE CHANGES · " + total + " GARMENTS"
+      : n > 1 ? "SAVE " + n + " BOXES · " + total + " EACH · " + (total * n) + " GARMENTS"
+      : "SAVE BOX " + (o.boxes.length + 1) + " · " + total + " GARMENTS";
     var gtName = ed ? b.word + (ed.num ? " " + ed.num : "") : boxName(o, b);
+    if (!ed && n > 1) {
+      var gm = gtName.match(/^(.*\D)\s(\d+)$/);
+      if (gm) gtName = gtName + " to " + gm[1] + " " + (Number(gm[2]) + n - 1);
+    }
+    var over = !ed && n > 1 && total ? copiesOver(o, b, n) : [];
+    var copiesTile = ed ? "" : '<button class="copies' + (selCopies ? " sel" : "") + (n > 1 ? " has" : "") + (!n ? " bad" : "") + '" data-act="box-cell" data-k="copies" aria-pressed="' + selCopies + '" aria-label="Boxes like this: ' + (b.copies || "") + '">' +
+      '<span class="l">BOXES LIKE THIS</span><span class="v">× ' + esc(b.copies == null ? "1" : b.copies || "—") + "</span>" +
+      '<span class="h">' + (selCopies ? "TYPE ON THE KEYPAD" : "TAP TO CHANGE") + "</span></button>";
     var words = [];
     if (ed) {
       o.lines.forEach(function (l) { var w = lineWord(l); if (words.indexOf(w) < 0) words.push(w); });
@@ -1105,17 +1135,21 @@
       wordChips +
       '<div><div class="sec-label">' + (ed ? "" : "1 · ") + 'PACKAGING TYPE</div><div class="chips">' + types + "</div></div>" +
       '<div class="row2"><div class="grow"><div class="sec-label">' + (ed ? "" : "2 · ") + 'QUANTITY + SIZE COUNTED <span style="color:var(--text-ghost)">· TAP A SIZE, TYPE THE COUNT</span></div>' + groups + "</div>" +
-      '<div class="pad-wrap"><div class="pad-for">' + (selSize || selExtra ? "COUNT FOR <b>" + esc(selName) + "</b>" + (selExtra ? " · EXTRA" : "") + (o.lines.length > 1 ? " · " + esc(selLine.color || selLine.product) : "") : "TAP A SIZE") + "</div>" +
+      '<div class="pad-wrap"><div class="pad-for">' + (selCopies ? "HOW MANY <b>BOXES LIKE THIS</b> · 1 TO " + MAX_COPIES : selSize || selExtra ? "COUNT FOR <b>" + esc(selName) + "</b>" + (selExtra ? " · EXTRA" : "") + (o.lines.length > 1 ? " · " + esc(selLine.color || selLine.product) : "") : "TAP A SIZE") + "</div>" +
       '<div class="pad">' + keys + "</div>" +
       '<div class="quick"><button data-act="box-rest"' + (selSize && restN ? "" : " disabled") + ">Rest of " + (selSize ? esc(selSize.size) : "size") + " (" + restN + ")</button>" +
       '<button data-act="box-next"' + (selSize || selExtra ? "" : " disabled") + ">Next size →</button></div></div></div>" +
-      '<div class="total-bar' + (total ? " on" : "") + '"><div><div class="l">TOTAL IN THIS BOX</div><div class="v" aria-live="polite">' + total + "</div></div>" +
+      '<div class="total-bar' + (total ? " on" : "") + '"><div><div class="l">' + (n > 1 ? "IN EACH BOX" : "TOTAL IN THIS BOX") + '</div><div class="v" aria-live="polite">' + total + "</div></div>" +
+      copiesTile +
       '<div class="gt">Garment Type<b>' + esc(gtName) + "</b></div></div>" +
       (total > 9999 ? '<div class="fin-warn">One box can hold at most 9999 garments.</div>' : "") +
+      (!ed && !n ? '<div class="fin-warn">Boxes like this: type a number from 1 to ' + MAX_COPIES + ".</div>" : "") +
+      (over.length ? '<div class="fin-warn">' + n + " boxes × " + total + " = " + (total * n) + " garments, more than the order has left in " +
+        over.map(function (x) { return esc(x.size) + " (" + x.need + " for " + x.left + " left)"; }).join(", ") + ". Check the number of boxes.</div>" : "") +
       '<div class="save-row"><button class="save' + (state.saving ? " busy" : "") + '" data-act="' + (ed ? "save-edit" : "save-box") + '"' + (ready && !state.saving ? "" : " disabled") + ">" +
       (state.saving ? '<span class="spin"></span>' : "") + label + "</button>" +
       (ed ? '<button class="save alt" data-act="close"' + (state.saving ? " disabled" : "") + ">CANCEL</button>"
-          : '<button class="save alt" data-act="save-box-new"' + (ready && !state.saving ? "" : " disabled") + ">SAVE BOX &amp; NEW</button>") + "</div></div></div>";
+          : '<button class="save alt" data-act="save-box-new"' + (ready && !state.saving ? "" : " disabled") + ">" + (n > 1 ? "SAVE " + n + " &amp; NEW" : "SAVE BOX &amp; NEW") + "</button>") + "</div></div></div>";
   }
 
   function delSheetHtml(o) {
@@ -1386,13 +1420,13 @@
     api("POST", path, payload).then(function (r) {
       state.saving = false;
       if (!state.user) return;
-      if (r.ok && kind === "dup" && r.data && r.data.error === "partial") {
+      if (r.ok && (kind === "dup" || kind === "box") && r.data && r.data.error === "partial") {
         // Some copies exist, some don't: say exactly that, and never retry the whole batch.
         state.pending = null;
         var po = current();
         if (po) Array.prototype.push.apply(po.boxes, r.data.boxes || []);
-        state.sheet = null; state.dup = null; renderOverlay(); renderMain();
-        showToast({ kind: "err", title: r.data.created + " CREATED · " + r.data.failed + " NOT CREATED", body: r.data.message || "" });
+        state.sheet = null; state.dup = null; state.box = null; renderOverlay(); renderMain();
+        showToast({ kind: "err", title: r.data.created + (kind === "box" ? " SAVED · " : " CREATED · ") + r.data.failed + (kind === "box" ? " NOT SAVED" : " NOT CREATED"), body: r.data.message || "" });
         loadOrders();
         return;
       }
@@ -1416,6 +1450,10 @@
           var bx = r.data.boxes, first = bx[0], last = bx[bx.length - 1];
           showToast({ kind: "ok", title: bx.length + (bx.length === 1 ? " BOX CREATED" : " BOXES CREATED"),
             body: (bx.length === 1 ? "“" + first.name + "”" : "“" + first.name + "” to “" + last.name + "”") + " · " + (first.sizes ? first.sizes.replace(/ = \d+$/, "") + " · " : "") + first.qty + " garments each · " + first.type + ". All confirmed by Salesforce on " + o.num + "." });
+        } else if (kind === "box" && o && r.data.boxes && r.data.boxes.length > 1) {
+          Array.prototype.push.apply(o.boxes, r.data.boxes);
+          var mb = r.data.boxes, m1 = mb[0], m2 = mb[mb.length - 1];
+          showToast({ kind: "ok", title: mb.length + " BOXES SAVED", body: "“" + m1.name + "” to “" + m2.name + "” · " + (m1.sizes ? m1.sizes.replace(/ = \d+$/, "") + " · " : "") + m1.qty + " garments each · " + m1.type + ". All confirmed by Salesforce on " + o.num + "." });
         } else if (kind === "box" && o && r.data.box) {
           o.boxes.push(r.data.box);
           showToast({ kind: "ok", title: "BOX SAVED", body: "“" + r.data.box.name + "” · " + (r.data.box.sizes ? r.data.box.sizes.replace(/ = \d+$/, "") + " · " : "") + r.data.box.qty + " garments · " + r.data.box.type + " is in Salesforce on " + o.num + "." });
@@ -1464,15 +1502,18 @@
   function saveBox(andNew) {
     var o = current(), b = state.box; if (!o || !b) return;
     var counts = boxCounts(o, b), total = boxTotal(o, b);
-    if (!total || total > 9999 || !b.type) return;
-    send("box", { orderId: o.id, type: b.type, counts: counts, name: boxName(o, b), requestId: b.requestId }, { andNew: !!andNew });
+    var n = copiesN(b);
+    if (!total || total > 9999 || !b.type || !n) return;
+    var payload = { orderId: o.id, type: b.type, counts: counts, name: boxName(o, b), requestId: b.requestId };
+    if (n > 1) payload.copies = n;
+    send("box", payload, { andNew: !!andNew });
   }
 
   /** A fresh, blank box form (default Packaging Type, nothing counted, new one-time save id). */
   function newBox(o) {
     var def = state.boxTypes.filter(function (t) { return t.isDefault; })[0];
     var first = o && o.lines[0] && o.lines[0].sizes[0];
-    return { type: def ? def.value : "", cells: {}, sel: first ? cellKey(0, first.size) : null, requestId: newRequestId() };
+    return { type: def ? def.value : "", cells: {}, sel: first ? cellKey(0, first.size) : null, copies: "1", requestId: newRequestId() };
   }
   function saveMis() {
     var o = current(), m = state.mis; if (!o || !m || !m.size || !m.reason) return;
@@ -1668,7 +1709,11 @@
     },
     close: function () { if (state.saving) return; state.sheet = null; state.delMany = null; renderOverlay(); },
     "box-type": function (el) { state.box.type = el.getAttribute("data-v"); renderOverlay(); },
-    "box-cell": function (el) { state.box.sel = el.getAttribute("data-k"); renderOverlay(); },
+    "box-cell": function (el) {
+      var k = el.getAttribute("data-k");
+      if (k === "copies" && state.box.sel !== "copies") state.box.copiesFresh = true;
+      state.box.sel = k; renderOverlay();
+    },
     "add-more": function (el) {
       var b = state.box; if (!b) return;
       var li = Number(el.getAttribute("data-i"));
@@ -1684,6 +1729,12 @@
     "add-cancel": function () { if (state.box) { state.box.adding = null; renderOverlay(); } },
     "box-key": function (el) {
       var b = state.box; if (!b.sel) return;
+      if (b.sel === "copies") {
+        var kc = el.getAttribute("data-k"), vc = b.copies == null ? "1" : String(b.copies);
+        if (b.copiesFresh) { vc = ""; b.copiesFresh = false; }   // the first digit replaces the 1
+        if (kc === "C") vc = ""; else if (kc === "<") vc = vc.slice(0, -1); else if (vc.length < 3) vc = (vc === "0" ? "" : vc) + kc;
+        b.copies = vc; renderOverlay(); return;
+      }
       var k = el.getAttribute("data-k"), v = b.cells[b.sel] || "";
       if (k === "C") v = ""; else if (k === "<") v = v.slice(0, -1); else if (v.length < 4) v = (v === "0" ? "" : v) + k;
       b.cells[b.sel] = v; renderOverlay();
