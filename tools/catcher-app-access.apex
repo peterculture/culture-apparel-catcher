@@ -11,7 +11,7 @@
 //                    Error flow's table shows). Order Products follow the Order's access (Edit on Order).
 //   Order Packaging  Read + Create + Edit + Delete + View All (Edit Box / Delete Box; the app allows
 //                    changes only within 7 days of a box being created).
-//   Account, Product, Price Book, the Printer's object   Read only.
+//   Account, Product (incl. Product Family, 11-02), Price Book, the Printer's object   Read only.
 String USERNAME_PREFIX = 'catcher.app@';
 String PS_NAME = 'Catcher_App_Access';
 
@@ -81,6 +81,7 @@ Map<String, Boolean> fields = new Map<String, Boolean>{
     'Order.Packaging_Count__c' => true,
     'Order.Shipping_Delivery__c' => false,   // 10-27: Delivery Method badge (read only)
     'OrderItem.Size__c' => false, 'OrderItem.Color__c' => false,
+    'Product2.Family' => false,              // 11-02: box names (Hoodies / Crewnecks / Long Sleeves...), read only
     'OrderItem.Misprint_Quantity__c' => true, 'OrderItem.Damaged_Quantity__c' => true,
     'Order_Packaging__c.Order__c' => true, 'Order_Packaging__c.Packaging_Type__c' => true,
     'Order_Packaging__c.Packaging_Quantity__c' => true, 'Order_Packaging__c.Quantity_Size_Counted__c' => true, 'Order_Packaging__c.CountedBy__c' => true
