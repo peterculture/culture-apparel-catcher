@@ -84,19 +84,44 @@
     var d = new Date(iso); if (isNaN(d)) return "";
     return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   }
-  /** "Tees", "Hats", "Hoodies"... — the word the shop already uses in box names. */
-  function shortFor(product) {
+  /* The word the shop uses in box names: "Tees", "Hoodies", "Crewnecks"... (Garment Type = word + box number).
+     Decided in this order (11-02: every box was coming out "Tees", because product names are mostly
+     brand + style number, e.g. "Lane Seven LS16004", "Pennant 5483"):
+       1. STYLE_WORDS: style numbers we know (Lane Seven, Anthony 11-02). Checked first, because
+          Salesforce's Product Family can't tell a hoodie from a crew ("Sweatshirts" for both).
+       2. A garment word in the product name ("HEAVY CREW", "Pullover Hooded"...).
+       3. The product's Family in Salesforce ("Hoodies", "Long Sleeve", "T-Shirts"...).
+       4. Otherwise "Tees". */
+  var STYLE_WORDS = [
+    // Lane Seven (Anthony 11-02: "make all the Lane Seven garments crewnecks"; LS14001 is the hoodie)
+    [/\bLS14001(YH)?\b/i, "Hoodies"], [/\bLS16001\b/i, "Hoodies"], [/\bLS19001\b/i, "Hoodies"], [/^Lane Seven 17001\b/i, "Hoodies"],
+    [/\bLS14004\b/i, "Crewnecks"], [/\bLS16004\b/i, "Crewnecks"],
+    [/\bLS15001\b/i, "Tees"], [/\bLS16005\b/i, "Tees"], [/\bLST002\b/i, "Tees"],
+    [/\bLS16006\b/i, "Joggers"]
+  ];
+  var FAMILY_WORDS = {
+    "t-shirts": "Tees", "short sleeve": "Tees", "youth t-shirt": "Tees",
+    "hoodies": "Hoodies", "sweatshirts": "Crewnecks", "sweatshirt": "Crewnecks", "fleece": "Fleece",
+    "long sleeve": "Long Sleeves", "polo": "Polos", "hats": "Hats", "headwear": "Hats", "hd": "Hats",
+    "headwear - winter": "Beanies", "outerwear": "Jackets", "zip up jackets": "Jackets", "bags": "Bags"
+  };
+  function shortFor(product, family) {
     var p = String(product || "");
+    for (var i = 0; i < STYLE_WORDS.length; i++) if (STYLE_WORDS[i][0].test(p)) return STYLE_WORDS[i][1];
     if (/beanie/i.test(p)) return "Beanies";
     if (/\bhat\b|\bcap\b|trucker|snapback|richardson/i.test(p)) return "Hats";
     if (/hood/i.test(p)) return "Hoodies";
-    if (/crew|sweat|fleece/i.test(p)) return "Crewnecks";
+    if (/crew|sweat/i.test(p)) return "Crewnecks";
     if (/polo/i.test(p)) return "Polos";
     if (/tank/i.test(p)) return "Tanks";
     if (/long ?sleeve|\bl\/?s\b/i.test(p)) return "Long Sleeves";
     if (/tote|bag/i.test(p)) return "Bags";
+    var f = FAMILY_WORDS[String(family || "").trim().toLowerCase()];
+    if (f) return f;
+    if (/fleece/i.test(p)) return "Fleece";
     return "Tees";
   }
+  function lineWord(l) { return shortFor(l && l.product, l && l.family); }
   function findIn(list, id) {
     for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
     return null;
@@ -992,9 +1017,9 @@
   /** Garment Type, e.g. "Tees 3" -- the shop word for what's in the box, and the box number. */
   function boxName(o, b) {
     var used = {};
-    boxCounts(o, b).forEach(function (c) { used[shortFor(o.lines[c.line].product)] = 1; });
+    boxCounts(o, b).forEach(function (c) { used[lineWord(o.lines[c.line])] = 1; });
     var words = Object.keys(used);
-    var short = words.length ? words.join(" + ") : shortFor(o.lines[0] ? o.lines[0].product : "");
+    var short = words.length ? words.join(" + ") : lineWord(o.lines[0]);
     // Next number after the highest one already used for this Garment Type (same rule as the server).
     var top = 0;
     o.boxes.forEach(function (x) {
@@ -1066,7 +1091,7 @@
     var gtName = ed ? b.word + (ed.num ? " " + ed.num : "") : boxName(o, b);
     var words = [];
     if (ed) {
-      o.lines.forEach(function (l) { var w = shortFor(l.product); if (words.indexOf(w) < 0) words.push(w); });
+      o.lines.forEach(function (l) { var w = lineWord(l); if (words.indexOf(w) < 0) words.push(w); });
       if (words.indexOf(ed.word0) < 0) words.unshift(ed.word0);
     }
     var wordChips = ed ? '<div><div class="sec-label">GARMENT TYPE <span style="color:var(--text-ghost)">· BOX NUMBER ' + esc(ed.num || "—") + ' STAYS THE SAME</span></div><div class="chips">' +

@@ -195,7 +195,7 @@ export async function loadReviewOrder(env, orderId) {
 async function buildOrders(env, orders) {
   const ids = orders.map((o) => soqlQuote(o.Id)).join(",");
   const [items, boxes] = await Promise.all([
-    runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name, Misprint_Quantity__c, Damaged_Quantity__c, LastModifiedDate FROM OrderItem WHERE OrderId IN (${ids}) ORDER BY CreatedDate ASC`),
+    runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name, Product2.Family, Misprint_Quantity__c, Damaged_Quantity__c, LastModifiedDate FROM OrderItem WHERE OrderId IN (${ids}) ORDER BY CreatedDate ASC`),
     runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, ${COUNTED_BY_FIELD}, CreatedDate, LastModifiedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
   ]);
 
@@ -209,7 +209,8 @@ async function buildOrders(env, orders) {
       const product = (it.Product2 && it.Product2.Name) || "Garment";
       const color = it.Color__c || "";
       const key = product + "|" + color;
-      if (!groups.has(key)) groups.set(key, { product, color, sizes: new Map() });
+      // Product Family ("T-Shirts", "Hoodies"...): what kind of garment it is, for the box name (11-02).
+      if (!groups.has(key)) groups.set(key, { product, color, family: (it.Product2 && it.Product2.Family) || "", sizes: new Map() });
       const g = groups.get(key);
       const size = String(it.Size__c).trim();
       if (!g.sizes.has(size)) g.sizes.set(size, { qty: 0, items: [] });
@@ -225,7 +226,7 @@ async function buildOrders(env, orders) {
         .map(([size, c]) => ({ size, qty: c.qty, boxed: 0,
           misprinted: c.items.reduce((a, x) => a + x.mis, 0), damaged: c.items.reduce((a, x) => a + x.dmg, 0), items: c.items }));
       // extras: sizes NOT on the order that have been boxed anyway ("Add More"), e.g. [{ size: "2XL", boxed: 3 }]
-      return { product: g.product, color: g.color, sizes, extras: [], total: sizes.reduce((a, s) => a + s.qty, 0) };
+      return { product: g.product, color: g.color, family: g.family, sizes, extras: [], total: sizes.reduce((a, s) => a + s.qty, 0) };
     });
     // Name = "Garment Type" (e.g. "Tees 2"); Packaging_Quantity__c = the box's total;
     // Quantity_Size_Counted__c = the size breakdown (blank on boxes logged before 10-15).

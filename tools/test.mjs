@@ -1083,6 +1083,22 @@ await test("Select + delete: the tablet side (11-02)", async () => {
   ok(/pick: function \(el\) \{\s*state\.picking = null;/.test(js) && /mode: function \(el\) \{\s*state\.picking = null;/.test(js), "changing order or list ends SELECT");
 });
 
+await test("Box names: Lane Seven styles, name words, then Product Family (11-02)", async () => {
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  const a = js.indexOf("  var STYLE_WORDS"), b = js.indexOf("  function lineWord");
+  const shortFor = new Function(js.slice(a, b) + "; return shortFor;")();
+  const want = [["Lane Seven LS16004", "", "Crewnecks"], ["Lane Seven LS14004", "", "Crewnecks"], ["Lane Seven LS14001", "Sweatshirts", "Hoodies"],
+    ["Lane Seven LS14001YH", "Sweatshirts", "Hoodies"], ["Lane Seven LS15001", "Short Sleeve", "Tees"], ["Lane Seven LS16006", "Outerwear", "Joggers"],
+    ["Cotton Collective HEAVY CREW 15oz", "Sweatshirts", "Crewnecks"], ["AS Colour 5161", "Hoodies", "Hoodies"], ["American Apparel 2007", "Long Sleeve", "Long Sleeves"],
+    ["Pennant 5483", "Sweatshirt", "Crewnecks"], ["Comfort Colors 1717", "T-Shirts", "Tees"], ["Richardson 112 Hat", "", "Hats"], ["Mystery 123", "None", "Tees"]];
+  for (const [p, f, w] of want) ok(shortFor(p, f) === w, `${p} [${f}] -> ${w} (got ${shortFor(p, f)})`);
+  ok(/lineWord\(o\.lines\[c\.line\]\)/.test(js) && !/shortFor\(o\.lines|shortFor\(l\.product\)/.test(js), "box name and Edit Box chips both use the line's product + Family");
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  db.items.forEach((i) => { i.Product2.Family = "T-Shirts"; });
+  const l = (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders;
+  ok(calls.some((c) => /Product2\.Family/.test(decodeURIComponent(c.url))) && l[0].lines[0].family === "T-Shirts", "the server reads Product2.Family and sends it with each garment line");
+});
+
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
   reset(); const env = ENV(); const c = await signIn(env, "4821");
   behave.noDeliveryField = true;

@@ -326,3 +326,17 @@ be changed. Each open box becomes a tick box (locked ones can't be ticked); **SE
 7-day review on the server's clock). If any one fails, nothing is deleted. Then one all-or-nothing Salesforce
 call (`composite/sobjects` DELETE, `allOrNone=true`, at most 100) deletes them, into the Recycle Bin. A finished
 order's Packaging Count follows, as with a single delete. Changing order or list ends SELECT.
+
+## Box names: Garment Type word (11-02)
+
+A box's Garment Type is a word + its number ("Crewnecks 3"). The word comes from the garment the sizes
+were counted on, in this order (`shortFor()` in `app.js`):
+1. `STYLE_WORDS`: style numbers we know. Lane Seven LS14001/LS14001YH/LS16001/LS19001/17001 = Hoodies,
+   LS14004/LS16004 = Crewnecks, LS15001/LS16005/LST002 = Tees, LS16006 = Joggers. Checked first because
+   Salesforce's Product Family says "Sweatshirts" for hoodies and crews alike. Add a style here when needed.
+2. A garment word in the product name (hood, crew, beanie, hat, polo, tank, long sleeve, tote...).
+3. The product's Family in Salesforce (`Product2.Family`, read by `_orders.js`): T-Shirts → Tees,
+   Hoodies, Sweatshirts → Crewnecks, Long Sleeve → Long Sleeves, Hats, Outerwear → Jackets...
+4. Otherwise "Tees".
+Duplicate Box keeps the source box's word. `tools/rename-lane-seven-boxes.apex` fixed the Lane Seven boxes
+saved as "Tees" before this (21495-1, 20847-7, 21582).
