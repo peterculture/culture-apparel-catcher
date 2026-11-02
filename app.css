@@ -498,14 +498,15 @@ html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-conten
  * ROOMIER LAYOUT (Anthony 11-02, from the "The Catch: Roomier Layout" mockup)
  * More space, fewer boxes-inside-boxes: wider margins, bigger gaps between sections,
  * the size counts / stats / box rows sit on the background instead of in bordered
- * panels, the header loses the photo strip and the order list loses the photo banner
- * (the season stays as a small chip). Everything is here, after the original rules,
+ * panels. The seasonal photos (header strip + order-list banner) stay (Anthony 11-02:
+ * "Where did the seasonal picture go?" -> both back). Everything is here, after the original rules,
  * so the whole change can be taken back by deleting this block (and the 4 --hdr lines).
  * Sizes stay in rem, so the − / + screen-size buttons still scale it all.
  * ========================================================================= */
 
-/* header: no photo strip, more room between the controls */
-.ca-hdr-tag { display: none; }
+/* header: more room between the controls (the seasonal photo strip stays; its words get
+   slightly tighter tracking on an iPad in landscape so they fit next to the clock) */
+@media (min-width: 1101px) and (max-width: 1300px) { .ca-hdr-tag { letter-spacing: .2em; font-size: 12px; padding: 0 18px; } }
 .hdr-logo { padding: 0 28px; }
 .hdr-brand { height: 48px; }
 .hdr-right { gap: 20px; }
@@ -518,14 +519,9 @@ html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-conten
 .mode-tabs { gap: .75rem; margin: 0 1.75rem .25rem; padding-top: 1.75rem; }
 .mode-tabs button { min-height: 3.75rem; }
 .list-head { padding: 1.5rem 1.75rem 1.25rem; }
-.list-title h1 { font-size: 1.05rem; color: var(--text-secondary); }
-.list-count { font-size: 1.05rem; }
 .list-sub { margin-top: .6rem; }
-html[data-ca-season] .ca-season-head { background-image: none; border-left: 0; border-bottom: 0; }
-html[data-ca-season] .ca-season-head h1, html[data-ca-season] .ca-season-head .list-sub { text-shadow: none; }
-html[data-ca-season] .ca-season-head .season-chip { margin-top: 1rem; color: var(--text-secondary); }
-.ca-season-head .season-sep, .ca-season-head .ca-season-range { display: none; }
-.ca-season-head .season-fx { margin-left: .25rem; background: var(--surface-card); border-color: var(--border-strong); color: var(--warn-soft); }
+html[data-ca-season] .ca-season-head .season-chip { margin-top: 1rem; }
+html[data-ca-season] .ca-season-head { margin-bottom: 1.25rem; }
 .search { margin: 0 1.75rem 1.25rem; }
 .search input { min-height: 3.5rem; border-width: 1px; border-radius: .9rem; }
 .search-none { margin: 0 1.75rem; }

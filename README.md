@@ -352,8 +352,7 @@ than the order has left in a size. Every new box form starts at ×1, also after 
 ## Roomier layout (11-02)
 
 From the "The Catch: Roomier Layout" mockup: wider margins, bigger gaps, and fewer bordered panels (size counts,
-the Boxes / Boxed / Misprints numbers and the box rows sit on the background). The header is 84px with no photo
-strip; the order list keeps the season as a small chip instead of the photo banner (the sign-in screen keeps its
-photo). All of it is one block at the end of `app.css` ("ROOMIER LAYOUT") plus `--hdr: 86px`, which the order
+the Boxes / Boxed / Misprints numbers and the box rows sit on the background). The header is 84px. The seasonal
+photos (header strip, order-list banner, sign-in screen) all stay. All of it is one block at the end of `app.css` ("ROOMIER LAYOUT") plus `--hdr: 86px`, which the order
 screen, forms, mockup viewer and toasts use for the header height. Delete that block and set `--hdr` back to 78px
 (and `.hdr` height to 76px) to undo.
