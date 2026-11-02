@@ -303,3 +303,15 @@ textbox and **SEND REPORT**. Rebuilt from The Forge's Help page (*Help Page Rema
   screen and order the catcher was on, screen size and device. Those extras are not emailed.
   Read them in Cloudflare: Workers & Pages → KV → the app's namespace.
 - What's typed is kept if the pop-up is closed (X, Escape, or a tap outside it) until it's sent or the catcher signs out.
+
+## 3D buttons (11-02)
+
+Copied from The Forge (`ca-api.js` "3D buttons", Button Lab "4 px thickness", incl. its Safari fix) into
+its own file, `buttons-3d.js`, loaded after `app.js`. Every filled button gets a 4 px lip in its own colour
+at half brightness and presses down 4 px when tapped; nothing else about a button changes. Ghost buttons
+(transparent), disabled buttons and anything under `data-no3d` stay flat.
+
+The Catch's differences: `morph()` in `app.js` keeps the 3D classes when a form updates in place (no flicker,
+no pop-up mid-press); the press animation runs only while a finger is down, so the order list rebuilt every
+refresh doesn't animate; a button placed with its own CSS transform (the search ×) stays flat.
+To keep one button flat: add `data-no3d` to it or a parent.

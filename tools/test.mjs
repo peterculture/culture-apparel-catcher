@@ -1007,6 +1007,29 @@ await test("Help: the page has a ? button and a pop-up, no tab (11-02)", async (
   let parsed = true; try { new Function(js); } catch (e) { parsed = false; } ok(parsed, "app.js parses");
 });
 
+await test("3D buttons: The Forge's layer, copied (11-02)", async () => {
+  const L = readFileSync(join(root, "buttons-3d.js"), "utf8"), html = readFileSync(join(root, "index.html"), "utf8"), js = readFileSync(join(root, "app.js"), "utf8");
+  ok(/<script src="\/buttons-3d\.js" defer><\/script>/.test(html) && html.indexOf("/app.js") < html.indexOf("/buttons-3d.js"), "index.html loads it after app.js");
+  ok(/var LIP = 4;/.test(L), "lip is 4 px");
+  ok(/var k = lum > 0\.6 \? 0\.8 : 0\.5;/.test(L) && /lum < 0\.12\) return "rgba\(0,0,0,\.75\)"/.test(L) && /--ca-drop:rgba\(0,0,0,\.28\)/.test(L), "lip = own colour at half brightness; near-black faces a near-black lip; light faces a soft one");
+  ok(!/style\.setProperty/.test(L) && /sheet\.insertRule\(rule/.test(L) && /"ca-lip-" \+ \(\+\+lipN\)/.test(L), "never writes a button's style attribute (the Safari fix): classes + rules in its own sheet");
+  ok(/c\.a >= 0\.15/.test(L) && /if \(!face\) \{ flatten\(b\)/.test(L), "ghost buttons stay flat");
+  ok(/b\.disabled \|\| b\.hasAttribute\("data-no3d"\)/.test(L) && /b\.style\.boxShadow \|\| b\.style\.transform/.test(L), "disabled, data-no3d and own inline shadow/transform stay flat");
+  ok(/cs\.transform !== "none"\) \{ flatten\(b\)/.test(L), "a button placed with its own CSS transform (search ×) stays flat");
+  ok(/button\.ca-3d\.ca-down\{transform:translateY\(" \+ LIP \+ "px\)/.test(L), "pressed: face travels the lip height, lip goes");
+  ok(/addEventListener\("pointerdown"/.test(L) && /addEventListener\("pointerup", up, true\)/.test(L), "press on pointerdown (iPad), released after pointerup");
+  ok(/button\.ca-3d\.ca-live\{transition/.test(L) && !/button\.ca-3d\{[^}]*transition/.test(L), "animation only while pressed (a rebuilt list doesn't animate its lips in)");
+  ok(/prefers-reduced-motion:reduce/.test(L) && /@media print\{button\.ca-3d\{box-shadow:none!important/.test(L), "reduced motion: no travel; print: no 3D");
+  ok(/new MutationObserver/.test(L) && /if \(have !== want\)/.test(L), "re-dresses changed buttons, writes only on a difference");
+  ok(/function keep3d\(el\)/.test(js) && /with3d\(a\.value, from\)/.test(js), "morph() keeps the 3D classes when a form updates in place");
+  ok(/typeof MutationObserver === "undefined"/.test(L) && /function safeStart\(\) \{ try \{ start\(\); \}/.test(L), "skips pages without MutationObserver, never throws");
+  const g = globalThis.window, d = globalThis.document;
+  globalThis.window = globalThis; globalThis.document = { body: {}, addEventListener() {}, getElementById() { return null; }, createElement() { return { style: {} }; }, head: { appendChild() {} } };
+  let threw = false; try { new Function(L)(); } catch (e) { threw = true; }
+  globalThis.window = g; globalThis.document = d;
+  ok(!threw, "loads in a stub page without throwing");
+});
+
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
   reset(); const env = ENV(); const c = await signIn(env, "4821");
   behave.noDeliveryField = true;

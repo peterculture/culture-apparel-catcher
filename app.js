@@ -1121,13 +1121,26 @@
    * elements before and after, so nothing jumps and focus isn't lost.
    * (Rebuilding the whole form on every tap is what used to throw the form back to the top.)
    */
+  /* 3D buttons (buttons-3d.js, 11-02): a button keeps its ca-3d / ca-lip-N / ca-down / ca-live
+     classes when a form is updated in place, so it never flickers flat or pops up mid-press. */
+  var CA3D = /^ca-(3d|down|live|lip-\d+)$/;
+  function keep3d(el) { return el.nodeName === "BUTTON" && /(^|\s)ca-3d(\s|$)/.test(el.getAttribute("class") || ""); }
+  function with3d(cls, el) {
+    if (!keep3d(el)) return cls;
+    var mine = (el.getAttribute("class") || "").split(/\s+/).filter(function (c) { return CA3D.test(c); });
+    return (cls ? cls + " " : "") + mine.join(" ");
+  }
   function morph(from, to) {
     if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) { from.parentNode.replaceChild(to, from); return; }
     if (from.nodeType === 3 || from.nodeType === 8) { if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue; return; }
     if (from.nodeType !== 1) return;
-    var i, a;
-    for (i = from.attributes.length - 1; i >= 0; i--) { a = from.attributes[i]; if (!to.hasAttribute(a.name)) from.removeAttribute(a.name); }
-    for (i = 0; i < to.attributes.length; i++) { a = to.attributes[i]; if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value); }
+    var i, a, v;
+    for (i = from.attributes.length - 1; i >= 0; i--) { a = from.attributes[i]; if (to.hasAttribute(a.name)) continue;
+      if (a.name === "class" && keep3d(from)) { v = with3d("", from); if (a.value !== v) from.setAttribute("class", v); } else from.removeAttribute(a.name); }
+    for (i = 0; i < to.attributes.length; i++) {
+      a = to.attributes[i]; v = a.name === "class" ? with3d(a.value, from) : a.value;
+      if (from.getAttribute(a.name) !== v) from.setAttribute(a.name, v);
+    }
     if (from.nodeName === "INPUT" || from.nodeName === "TEXTAREA") {
       var want = to.getAttribute("value") || "";
       if (document.activeElement !== from && from.value !== want) from.value = want;   // never fight the person typing
