@@ -288,3 +288,18 @@ an activated order", and the order used to stay on the board for good.
   Production, FINISH CATCHING lets the order go from the board anyway (KV key `board:released`, 14 days)
   and the tablet says "OFF THE BOARD · COUNT NOT SAVED". The boxes are already in Salesforce. An order
   that is still In Production is never let go this way.
+
+## Help: "Found a bug? Report it here" (11-02)
+
+A **?** button in the header (shown once a catcher is signed in) opens a pop-up, not a tab: one
+textbox and **SEND REPORT**. Rebuilt from The Forge's Help page (*Help Page Remake Guide*).
+
+- **Email:** `/api/bug-report` sends it through Salesforce (`emailSimple`) to anthony@cultureapparel.com
+  from info@cultureapparel.com (else as the app's own login). Subject `Catch bug report from <name>: <first 8 words>…`,
+  body = the report, a blank line, `<name> · <Chicago date and time>`.
+- **Needs once:** run `tools/catcher-send-email.apex` in Production (turns on Send Email in
+  `Catcher_App_Access`). Until then reports are kept but not emailed, and the pop-up says "It's saved".
+- **Backup copy:** every report is also kept for 180 days in KV (`CATCHER_KV`, keys `bugreport:…`), with the
+  screen and order the catcher was on, screen size and device. Those extras are not emailed.
+  Read them in Cloudflare: Workers & Pages → KV → the app's namespace.
+- What's typed is kept if the pop-up is closed (X, Escape, or a tap outside it) until it's sent or the catcher signs out.

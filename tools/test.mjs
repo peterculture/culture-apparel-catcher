@@ -27,6 +27,7 @@ const dup = await mod("duplicate-box");
 const past = await mod("past-orders");
 const bedit = await mod("box-edit");
 const bdel = await mod("box-delete");
+const bug = await mod("bug-report");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -163,6 +164,13 @@ globalThis.fetch = async (url, init = {}) => {
     if (ius && Math.floor(Date.parse(lm) / 1000) > Math.floor(Date.parse(ius) / 1000)) return new Response(null, { status: 412 });
     Object.assign(db.boxes[i], JSON.parse(init.body), { LastModifiedDate: new Date(Date.now() + 1000).toISOString() });
     return new Response(null, { status: 204 });
+  }
+  if (u.pathname.endsWith("/actions/standard/emailSimple") && method === "POST") {
+    const input = JSON.parse(init.body).inputs[0];
+    if (behave.emailDown) return res(500, [{ errorCode: "UNKNOWN_EXCEPTION", message: "down" }]);
+    if (behave.noOrgWide && input.senderType === "OrgWideEmailAddress") return res(400, [{ isSuccess: false, errors: [{ statusCode: "INVALID_FIELD", message: "senderAddress not allowed" }] }]);
+    db.sent = (db.sent || []).concat(input);
+    return res(200, [{ actionName: "emailSimple", isSuccess: true, errors: null }]);
   }
   const om = u.pathname.match(/\/sobjects\/Order\/(\w+)$/);
   if (om && method === "PATCH") {
@@ -950,6 +958,53 @@ await test("Activated order: FINISH CATCHING lets it go when Salesforce refuses 
   r = await finish.onRequestPost({ request: req("POST", "/api/finish", { orderId: "801000000000002AAA", requestId: "req-act00005" }, cookie), env });
   d = await r.json();
   ok(r.status === 200 && d.countSaved !== false && db.orders[1].Packaging_Count__c === 1, "Edit Activated Orders granted: count written");
+});
+
+await test("Help: bug report emails Anthony and keeps a backup copy (11-02)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const send = (body, c = cookie) => bug.onRequestPost({ request: req("POST", "/api/bug-report", body, c), env });
+  const kvReports = () => [...env.CATCHER_KV._m.keys()].filter((k) => k.startsWith("bugreport:")).map((k) => JSON.parse(env.CATCHER_KV._m.get(k)));
+  let r = await send({ text: "  hi " });
+  let d = await r.json();
+  ok(r.status === 400 && d.message === "Write a few words about what went wrong first." && !db.sent, "under 5 characters -> 400 with the sentence, no email");
+  r = await bug.onRequestPost({ request: req("POST", "/api/bug-report", { text: "Finish Catching said Not Saved" }), env });
+  ok(r.status === 401, "not signed in -> 401");
+  r = await send({ text: "Finish Catching on 21758 said Not Saved again and again", name: "Somebody Else", from: "In Production · 21758 · Finish Catching open", screen: "1180×820", agent: "iPad" });
+  d = await r.json();
+  ok(r.status === 200 && d.ok === true && d.emailed === true, "good report -> 200, emailed");
+  const m = db.sent && db.sent[0];
+  ok(db.sent.length === 1 && m.emailAddresses === "anthony@cultureapparel.com" && m.senderType === "OrgWideEmailAddress" && m.senderAddress === "info@cultureapparel.com", "one emailSimple, to Anthony, from the org-wide address");
+  ok(m.emailSubject === "Catch bug report from Maria R.: Finish Catching on 21758 said Not Saved again…", "subject -> " + m.emailSubject);
+  ok(/^Finish Catching on 21758 said Not Saved again and again\n\nMaria R\. · \w{3}, \d+\/\d+\/\d{4}, \d+:\d\d [AP]M$/.test(m.emailBody), "body = report, blank line, name · date -> " + JSON.stringify(m.emailBody));
+  ok(!/21758 · Finish|iPad|1180/.test(m.emailBody), "screen, order and device are not emailed");
+  let k = kvReports();
+  ok(k.length === 1 && k[0].emailed === true && k[0].name === "Maria R." && k[0].from === "In Production · 21758 · Finish Catching open" && k[0].agent === "iPad", "backup copy saved with the extra detail; signed-in name wins");
+  behave.noOrgWide = true; db.sent = [];
+  r = await send({ text: "Mockup would not load on 20984" });
+  d = await r.json();
+  ok(d.ok && d.emailed && db.sent.length === 1 && !db.sent[0].senderType, "org-wide sender refused -> sent as the app's own login");
+  behave.noOrgWide = false; behave.emailDown = true; db.sent = [];
+  r = await send({ text: "Box count is wrong on 21379" });
+  d = await r.json();
+  k = kvReports().filter((x) => x.text === "Box count is wrong on 21379");
+  ok(r.status === 200 && d.ok && d.emailed === false && k.length === 1 && k[0].emailed === false && k[0].emailError, "email down -> still ok, emailed false, backup saved with the error");
+  env.CATCHER_KV.put = async () => { throw new Error("kv down"); };
+  r = await send({ text: "Everything is broken today" });
+  d = await r.json();
+  ok(r.status === 502 && d.message === "That didn't send. Try again, or tell Anthony in person.", "email and backup both down -> 502 with the sentence");
+  behave.emailDown = false;
+});
+
+await test("Help: the page has a ? button and a pop-up, no tab (11-02)", async () => {
+  const html = readFileSync(join(root, "index.html"), "utf8"), js = readFileSync(join(root, "app.js"), "utf8"), css = readFileSync(join(root, "app.css"), "utf8");
+  ok(/<button id="help-btn"[^>]*hidden[^>]*aria-haspopup="dialog"/.test(html), "? button in the header, hidden until sign-in");
+  ok(/<div id="help"><\/div>/.test(html), "own pop-up container");
+  ok(!/help\.html/.test(html + js), "no Help page / tab");
+  ok(/"\/api\/bug-report"/.test(js) && (js.match(/<textarea id="help-what"/g) || []).length === 1, "one textarea, posts to /api/bug-report");
+  ok(/Found a bug\?<\/em> Report it here:/.test(js) && /Thanks, report sent\./.test(js), "question and thank-you wording");
+  ok(/state\.help = null; helpDraft = ""/.test(js), "sign-out clears the pop-up and what was typed");
+  ok(!/^\s*(html|body|:root)\b/m.test(css.slice(css.indexOf("/* ---- Help (11-02)"))), "help styles don't touch html, body or :root");
+  let parsed = true; try { new Function(js); } catch (e) { parsed = false; } ok(parsed, "app.js parses");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {

@@ -427,3 +427,33 @@ html[data-ca-season] .ca-season-pin .season-chip { margin-top: 0; justify-conten
 .empty.offline { margin-bottom: .75rem; border: 1px solid var(--warn); border-style: solid; background: var(--warn-bg); color: var(--warn-soft); }
 .empty.offline strong { color: #F2D29A; }
 .empty.offline .why { display: block; margin-top: .35rem; font-size: .85rem; color: var(--text-tertiary); }
+
+/* ---- Help (11-02): "?" in the header opens "Found a bug? Report it here:" as a pop-up. ----
+ * Rebuilt from The Forge's Help page (Help Page Remake Guide); scoped to .help-*, nothing global. */
+.help-btn { width: 54px; height: 54px; border-radius: 14px; background: var(--surface-card); border: 1px solid var(--border-strong); color: var(--text-primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.help-btn[hidden] { display: none; }
+.help-btn:active { background: var(--surface-input); }
+.help-btn[aria-expanded="true"] { border-color: var(--warn-soft); color: var(--warn-soft); }
+.help-scrim { z-index: 80; }
+.help-sheet { width: min(44rem, 100%); }
+.help-title { font-size: 1.1rem !important; color: var(--text-tertiary); }
+.help-body { display: flex; flex-direction: column; align-items: center; text-align: center; padding: .2rem .4rem .6rem; margin: 0; }
+.help-ask { margin: 0; font: 600 2.5rem/1.1 'Oswald'; letter-spacing: .03em; color: #F4F2EC; text-wrap: balance; }
+.help-ask em { font-style: normal; color: var(--accent-hot); }
+.help-hint { margin: 1rem 0 1.6rem; color: var(--text-tertiary); font: 400 1rem/1.6 'Archivo'; max-width: 46ch; text-wrap: pretty; }
+.help-sr { position: absolute; left: -9999px; }
+.help-body textarea { width: 100%; min-height: 12rem; resize: vertical; background: var(--surface-input); border: 1px solid var(--border); border-radius: .75rem; padding: 1.1rem 1.25rem; color: var(--text-primary); font: 400 1.06rem/1.55 'Archivo'; text-align: left; }
+.help-body textarea::placeholder { color: var(--text-muted); }
+.help-body textarea:focus { outline: none; border-color: var(--border-strong); box-shadow: 0 0 0 3px rgba(224,184,112,.18); }
+.help-body textarea:disabled { opacity: .6; }
+.help-err { margin: .75rem 0 0; min-height: 1.25rem; color: var(--danger-text); font: 500 .9rem/1.35 'Archivo'; }
+.help-send { width: 100%; margin-top: .9rem; min-height: 4.5rem; font-size: 1.35rem; }
+.help-btns { width: 100%; display: flex; flex-direction: column; gap: .2rem; }
+.help-btns .help-send.alt { margin-top: .6rem; min-height: 3.75rem; font-size: 1.1rem; }
+.help-tick { width: 3.5rem; height: 3.5rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: .4rem 0 1.1rem; background: var(--ok-bg); border: 1px solid var(--ok-strong); }
+.help-tick svg { stroke: var(--ok-text); }
+.help-body[role="status"] .help-hint { margin-bottom: .5rem; }
+@media (max-width: 560px) {
+  .help-ask { font-size: 1.9rem; }
+  .help-hint { margin-bottom: 1.2rem; }
+}

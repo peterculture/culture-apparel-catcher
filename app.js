@@ -38,12 +38,14 @@
     del: null,             // { boxId, requestId } while the Delete Box dialog is open
     logoutPending: null,   // a logout waiting for a save that's already on its way to Salesforce
     draft: null,           // an unsaved form kept for the SAME catcher after an automatic sign-out
-    signoutMsg: ""
+    signoutMsg: "",
+    help: null             // { text, sending, sent, emailed, err } while the Help pop-up is open (11-02)
   };
 
   var $app = document.getElementById("app");
   var $overlay = document.getElementById("overlay");
   var $toast = document.getElementById("toast");
+  var $help = document.getElementById("help");
   var toastTimer = null;
 
   /* ------------------------------------------------------------ helpers -- */
@@ -308,7 +310,7 @@
     state.scr = { board: freshScreen(), past: freshScreen() };
     state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null;
     state.pending = null; state.saving = false; state.pin = ""; state.pinErr = ""; state.mode = "board"; state.view = "list";
-    clearTimeout(toastTimer); state.toast = null;
+    clearTimeout(toastTimer); state.toast = null; state.help = null; helpDraft = "";
     state.signoutMsg = reason === "expired" ? "Your sign-in ended." : "";
     if (state.draft) state.signoutMsg += " " + state.draft.user + "'s unsaved entries on " + state.draft.num + " are kept and reopen when " + firstName(state.draft.user) + " signs in again.";
     $overlay.removeAttribute("data-shown");
@@ -424,7 +426,8 @@
     } else {
       who.hidden = true;
     }
-    renderMain(); renderOverlay(); renderToast(); applyZoom();
+    document.getElementById("help-btn").hidden = !state.user;
+    renderMain(); renderOverlay(); renderHelp(); renderToast(); applyZoom();
   }
 
   function renderMain() {
@@ -1168,6 +1171,79 @@
     if (t && t.kind === "ok") toastTimer = setTimeout(function () { state.toast = null; renderToast(); }, 7000);
   }
 
+
+  /* -------------------------------------------------------------- help --- */
+  /* HELP (11-02): the "?" in the header opens one pop-up, "Found a bug? Report it here:".
+     The report goes to /api/bug-report, which emails Anthony and keeps a backup copy.
+     Rebuilt from The Forge's Help page (Help Page Remake Guide), as a pop-up instead of a tab.
+     What's typed is kept if the pop-up is closed, until it's sent or the catcher signs out. */
+  var helpDraft = "";
+  function helpWhere() {
+    var o = current(), names = { box: "Log Boxes", mis: "Report Misprint", fin: "Finish Catching", dup: "Duplicate Box", del: "Delete Box", mock: "Mockup" };
+    return (state.mode === "past" ? "Past Orders" : "In Production") + (o ? " · " + o.num : "") + (state.sheet ? " · " + (names[state.sheet] || state.sheet) + " open" : "");
+  }
+  function openHelp() {
+    if (!state.user) return;
+    state.help = { text: helpDraft, sending: false, sent: false, emailed: false, err: "" };
+    renderHelp();
+  }
+  function closeHelp() {
+    if (!state.help || state.help.sending) return;
+    state.help = null; renderHelp();
+    var b = document.getElementById("help-btn"); if (b && !b.hidden) b.focus();
+  }
+  function helpHtml() {
+    var h = state.help;
+    var head = '<div class="sheet-head"><div class="sheet-title"><h2 class="help-title">HELP · REPORT A PROBLEM</h2></div>' +
+      '<button class="x" data-act="help-close" aria-label="Close"' + (h.sending ? " disabled" : "") + ">" + ICON.x + "</button></div>";
+    if (h.sent) {
+      return '<div class="scrim help-scrim" data-act="help-scrim"><div class="sheet help-sheet" role="dialog" aria-modal="true" aria-labelledby="help-ask">' + head +
+        '<div class="help-body" role="status"><div class="help-tick">' + ICON.check + "</div>" +
+        '<h3 class="help-ask" id="help-ask">Thanks, report sent.</h3>' +
+        '<p class="help-hint">' + (h.emailed ? "Anthony will get it by email and take a look." : "It's saved. Anthony will take a look.") + "</p>" +
+        '<div class="help-btns"><button class="save ok help-send" data-act="help-close" id="help-done">DONE</button>' +
+        '<button class="save alt help-send" data-act="help-again">REPORT SOMETHING ELSE</button></div></div></div></div>';
+    }
+    return '<div class="scrim help-scrim" data-act="help-scrim"><div class="sheet help-sheet" role="dialog" aria-modal="true" aria-labelledby="help-ask">' + head +
+      '<form class="help-body" id="help-form" novalidate>' +
+      '<h3 class="help-ask" id="help-ask"><em>Found a bug?</em> Report it here:</h3>' +
+      '<p class="help-hint">Tell us what you were doing and what went wrong. A sentence or two is plenty.</p>' +
+      '<label for="help-what" class="help-sr">What went wrong</label>' +
+      '<textarea id="help-what" maxlength="4000" placeholder="e.g. On 21758 I tapped Finish Catching and it said Not Saved."' + (h.sending ? " disabled" : "") + "></textarea>" +
+      '<p class="help-err" id="help-err" role="alert">' + esc(h.err) + "</p>" +
+      '<button type="submit" class="save help-send' + (h.sending ? " busy" : "") + '"' + (h.sending ? " disabled" : "") + ">" +
+      (h.sending ? '<span class="spin"></span>SENDING…' : "SEND REPORT") + "</button></form></div></div>";
+  }
+  function renderHelp() {
+    document.getElementById("help-btn").setAttribute("aria-expanded", state.help && state.user ? "true" : "false");
+    if (!state.help || !state.user) { $help.innerHTML = ""; return; }
+    $help.innerHTML = helpHtml();
+    var t = document.getElementById("help-what");
+    if (t) { t.value = state.help.text; if (!state.help.sending) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }
+    var d = document.getElementById("help-done"); if (d) d.focus();
+  }
+  function sendHelp() {
+    var h = state.help;
+    if (!h || h.sending) return;
+    var t = document.getElementById("help-what");
+    if (t) h.text = t.value;
+    var text = h.text.trim();
+    if (text.length < 5) { h.err = "Write a few words about what went wrong first."; renderHelp(); return; }
+    h.err = ""; h.sending = true; renderHelp();
+    api("POST", "/api/bug-report", { text: text, from: helpWhere(), screen: window.innerWidth + "×" + window.innerHeight, agent: navigator.userAgent })
+      .then(function (r) {
+        if (state.help !== h) return;            // closed by a sign-out meanwhile
+        h.sending = false;
+        if (r.ok && r.data && r.data.ok) {
+          h.sent = true; h.emailed = !!r.data.emailed; h.text = ""; helpDraft = "";
+        } else {
+          h.err = r.status === 0 ? "No answer from the server, so it didn't send. Check the Wi-Fi and try again."
+            : (r.data && r.data.message) || "That didn't send. Try again, or tell Anthony in person.";
+        }
+        renderHelp();
+      });
+  }
+
   /* ------------------------------------------------------------- saving -- */
   /* A save only goes out from a LIVE list. Anywhere else it's refused out loud, the form stays as
      it is, and the list is asked again at once so the catcher can tap save as soon as it's back. */
@@ -1541,8 +1617,13 @@
     "v-fit": function () { vz.k = 1; vz.x = 0; vz.y = 0; paintView(); }
   };
 
+  handlers["help-close"] = closeHelp;
+  handlers["help-again"] = function () { if (state.help) { state.help = { text: "", sending: false, sent: false, emailed: false, err: "" }; renderHelp(); } };
   document.addEventListener("click", function (e) {
+    // Help pop-up: a tap on the dimmed area outside it closes it (what was typed is kept).
+    if (e.target && e.target.getAttribute && e.target.getAttribute("data-act") === "help-scrim") { closeHelp(); return; }
     var el = e.target.closest ? e.target.closest("[data-act]") : null;
+    if (el && el.getAttribute("data-act") === "help-scrim") el = null;
     if (!el || el.disabled) return;
     var fn = handlers[el.getAttribute("data-act")];
     if (fn) fn(el);
@@ -1551,6 +1632,13 @@
     if (e.target && e.target.id === "mis-note" && state.mis) state.mis.note = e.target.value.slice(0, 80);
     if (e.target && e.target.id === "extra-size" && state.box && state.box.adding) state.box.adding.text = e.target.value.slice(0, 10);
     if (e.target && e.target.id === "order-search") { state.q = e.target.value.slice(0, 60); applySearch(); }
+    if (e.target && e.target.id === "help-what" && state.help) {
+      state.help.text = helpDraft = e.target.value.slice(0, 4000);
+      if (state.help.err) { state.help.err = ""; var er = document.getElementById("help-err"); if (er) er.textContent = ""; }
+    }
+  });
+  document.addEventListener("submit", function (e) {
+    if (e.target && e.target.id === "help-form") { e.preventDefault(); sendHelp(); }
   });
   // Leaving the search box: catch up on any refresh that waited while typing; "Done" closes the keyboard.
   document.addEventListener("focusout", function (e) {
@@ -1561,8 +1649,10 @@
     if (e.target && e.target.id === "extra-size" && e.key === "Enter" && state.box && state.box.adding) { e.preventDefault(); addExtra(state.box.adding.line, e.target.value); }
   });
   document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && state.help) { closeHelp(); return; }
     if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; renderOverlay(); }
   });
+  document.getElementById("help-btn").addEventListener("click", function () { if (state.help) closeHelp(); else openHelp(); });
   document.getElementById("zoom-in").addEventListener("click", function () { stepZoom(1); });
   document.getElementById("zoom-out").addEventListener("click", function () { stepZoom(-1); });
   document.getElementById("zoom-reset").addEventListener("click", function () { state.zoom = 1; saveZoom(1); applyZoom(); });
