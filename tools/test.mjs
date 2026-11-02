@@ -104,6 +104,7 @@ globalThis.fetch = async (url, init = {}) => {
       if (idm) recs = recs.filter((o) => o.Id === idm[1]);
       return res(200, { done: true, records: recs.map((o) => { const { _inProd, ...r } = o; return Object.assign({ Order_Substatus__c: _inProd ? "Production" : "Post-Production", Packaging_Count__c: null }, r); }) });
     }
+    if (/FROM OrderItem/.test(q) && behave.noFamily && /Product2\.Family/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column 'Family' on entity 'Product2'." }]);
     if (/FROM OrderItem/.test(q)) {
       db.items.forEach((i, n) => { if (!i.Id) i.Id = "802" + String(n + 1).padStart(15, "0"); if (!i.LastModifiedDate) i.LastModifiedDate = "2026-10-14T16:00:00.000+0000"; });
       return res(200, { done: true, records: db.items.filter((i) => q.includes(i.OrderId)) });
@@ -1081,6 +1082,19 @@ await test("Select + delete: the tablet side (11-02)", async () => {
   ok(/data-act="pick-all"/.test(js) && /data-act="pick-cancel"/.test(js) && /data-act="pick-delete"/.test(js), "Select all / Cancel / Delete N");
   ok(/delmany: "\/api\/box-delete-many"/.test(js) && /data-act="delmany-confirm"/.test(js), "a confirm dialog, then one request to /api/box-delete-many");
   ok(/pick: function \(el\) \{\s*state\.picking = null;/.test(js) && /mode: function \(el\) \{\s*state\.picking = null;/.test(js), "changing order or list ends SELECT");
+});
+
+await test("Product Family not readable: the board still loads (11-02 outage)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const om = await mod("_orders"); om._resetFamilyOff();
+  behave.noFamily = true;
+  let r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  let d = await r.json();
+  ok(r.status === 200 && d.orders.length === 2 && d.orders[0].lines.length > 0 && !d.orders[0].lines[0].family, "INVALID_FIELD on Product2.Family -> lines read again without it, board loads");
+  const n = calls.filter((c) => /Product2\.Family/.test(decodeURIComponent(c.url))).length;
+  r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  ok(r.status === 200 && calls.filter((c) => /Product2\.Family/.test(decodeURIComponent(c.url))).length === n, "then left out for 10 minutes (no failing query every refresh)");
+  behave.noFamily = false; om._resetFamilyOff();
 });
 
 await test("Box names: Lane Seven styles, name words, then Product Family (11-02)", async () => {

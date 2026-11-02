@@ -79,6 +79,29 @@ async function selectOrders(env, rest) {
   }
 }
 
+/* Product Family (Product2.Family, for box names, 11-02) is read only if the app's login can see it.
+ * 11-02 10:05 the board went down with "No such column 'Family' on entity 'Product2'": the login had
+ * no Read on that field. So, like Delivery Method: if Salesforce says INVALID_FIELD, read the lines
+ * again without it (box names fall back to the product name) and try again in 10 minutes.
+ * tools/catcher-app-access.apex grants Read on it. */
+let familyOffUntil = 0;
+const ITEM_FIELDS = "Id, OrderId, Size__c, Color__c, Quantity, Product2.Name, Misprint_Quantity__c, Damaged_Quantity__c, LastModifiedDate";
+async function selectItems(env, ids) {
+  const rest = ` FROM OrderItem WHERE OrderId IN (${ids}) ORDER BY CreatedDate ASC`;
+  const withFamily = Date.now() >= familyOffUntil;
+  if (!withFamily) return runQuery(env, `SELECT ${ITEM_FIELDS}${rest}`);
+  try {
+    return await runQuery(env, `SELECT ${ITEM_FIELDS}, Product2.Family${rest}`);
+  } catch (err) {
+    if (!(err instanceof SfError) || err.detail !== "INVALID_FIELD") throw err;
+    const rows = await runQuery(env, `SELECT ${ITEM_FIELDS}${rest}`);
+    console.warn("Product Family not readable by the app's login (run tools/catcher-app-access.apex); box names use the product name for 10 minutes");
+    familyOffUntil = Date.now() + 10 * 60 * 1000;
+    return rows;
+  }
+}
+export function _resetFamilyOff() { familyOffUntil = 0; }
+
 const SEEN_KEY = "board:seen";
 const SEEN_MS = 14 * 86400000;
 
@@ -195,7 +218,7 @@ export async function loadReviewOrder(env, orderId) {
 async function buildOrders(env, orders) {
   const ids = orders.map((o) => soqlQuote(o.Id)).join(",");
   const [items, boxes] = await Promise.all([
-    runQuery(env, `SELECT Id, OrderId, Size__c, Color__c, Quantity, Product2.Name, Product2.Family, Misprint_Quantity__c, Damaged_Quantity__c, LastModifiedDate FROM OrderItem WHERE OrderId IN (${ids}) ORDER BY CreatedDate ASC`),
+    selectItems(env, ids),
     runQuery(env, `SELECT Id, Order__c, Name, Packaging_Type__c, Packaging_Quantity__c, ${SIZE_FIELD}, ${COUNTED_BY_FIELD}, CreatedDate, LastModifiedDate, CreatedBy.Name FROM Order_Packaging__c WHERE Order__c IN (${ids}) ORDER BY CreatedDate ASC`),
   ]);
 
