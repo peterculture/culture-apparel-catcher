@@ -761,7 +761,7 @@
       : '<div class="mock"><span class="mock-none">NO MOCKUP<br>IN SALESFORCE</span></div>';
     var canSz = o.sizeChangesText != null;   // the Size Changes field is set up and readable
     var lines = o.lines.map(function (l, li) {
-      var szHead = l.changed ? '<span class="sz-tag">SIZES CHANGED</span>'
+      var szHead = l.changed ? '<span class="sz-tag">' + (l.changed.waiting ? "WRONG SIZES · WAITING ON ACCOUNT MANAGER" : "SIZES CHANGED") + "</span>"
         : canSz && l.sizes.length ? '<button class="sz-btn" data-act="sz-open" data-i="' + li + '">' + ICON.swap + "SIZES CHANGED?</button>" : "";
       var szNote = l.changed ? '<div class="sz-note"><div class="sz-note-text"><span>' + (l.changed.note ? "“" + esc(l.changed.note) + "”" : "Sizes changed.") + "</span>" +
         "<small>" + esc(l.changed.by) + " · " + esc(l.changed.date) + "</small></div>" +
@@ -849,7 +849,7 @@
   function openSizes(o, li) {
     var l = o.lines[li]; if (!l) return;
     var vals = {};
-    l.sizes.forEach(function (s) { vals[s.size] = String(s.qty); });
+    l.sizes.forEach(function (s) { vals[s.size] = String(s.received != null ? s.received : s.qty); });
     state.sz = { line: li, vals: vals, sel: l.sizes[0] ? l.sizes[0].size : null, fresh: true, note: l.changed ? l.changed.note || "" : "", requestId: newRequestId() };
     state.sheet = "sz"; state.toast = null; renderToast(); renderOverlay();
   }

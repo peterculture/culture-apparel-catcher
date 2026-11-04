@@ -22,7 +22,7 @@
 import { runQuery, soqlQuote, plainText, SfError, SF_ID } from "./_sf.js";
 import { SIZE_FIELD, parseBreakdown } from "./_sizes.js";
 import { COUNTED_BY_FIELD } from "./_boxes.js";
-import { SIZE_CHANGES_FIELD, applySizeChanges } from "./_sizechanges.js";
+import { SIZE_CHANGES_FIELD, ANSWER_FIELD, applySizeChanges, answerKeyOf } from "./_sizechanges.js";
 
 export const DEFAULT_PRINTERS = ["Culture Apparel", "Culture Apparel Press 2"];
 
@@ -71,6 +71,7 @@ export function deliveryOf(row) {
 const OPTIONAL_FIELDS = [
   { field: DELIVERY_FIELD, what: "Delivery Method (badges hidden)", off: 0 },
   { field: SIZE_CHANGES_FIELD, what: "Size Changes (sizes-changed notes not shown or saved)", off: 0 },
+  { field: ANSWER_FIELD, what: "Size Swap Answer (size changes read as 'print what was sent')", off: 0 },
 ];
 export function _resetOptionalOff() { for (const o of OPTIONAL_FIELDS) o.off = 0; deliveryOffUntil = 0; }
 /** SELECT Order rows, with the optional fields that can be read. */
@@ -299,7 +300,7 @@ async function buildOrders(env, orders) {
     }
     // SIZES CHANGED (11-04): the sizes that arrived replace the ordered ones for counting (sizes keep `ordered`).
     const sizeChangesReadable = SIZE_CHANGES_FIELD in o;
-    applySizeChanges(lines, o[SIZE_CHANGES_FIELD]);
+    applySizeChanges(lines, o[SIZE_CHANGES_FIELD], answerKeyOf(o[ANSWER_FIELD], ANSWER_FIELD in o));
     return {
       id: o.Id,
       num: plainText(o.GOA_Order_Number__c) || o.OrderNumber,
@@ -322,6 +323,7 @@ async function buildOrders(env, orders) {
       activated: o.StatusCode === "Activated",
       lines,
       sizeChangesText: sizeChangesReadable ? (o[SIZE_CHANGES_FIELD] || "") : null,   // null = field not readable
+      sizeSwapAnswer: ANSWER_FIELD in o ? (o[ANSWER_FIELD] || "") : null,             // null = no answer field (11-04)
       total: lines.reduce((a, l) => a + l.total, 0),
       extraBoxed,
       boxes: orderBoxes,

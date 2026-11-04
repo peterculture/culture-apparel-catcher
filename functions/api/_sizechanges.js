@@ -17,6 +17,27 @@
 import { garmentLabel } from "./_sizes.js";
 
 export const SIZE_CHANGES_FIELD = "Size_Changes__c";
+/* The customer's answer (11-04, shared with The Forge -- its functions/api/_size-swap.js;
+   keep the values identical). Optional Order picklist. No field in the org = every line means
+   "Print what was sent" (what this app's own form records). Blank = receiving recorded the
+   swap and the account manager hasn't answered yet: count the order as sold. */
+export const ANSWER_FIELD = "Size_Swap_Answer__c";
+export const ANSWERS = {
+  sent: "Print what was sent",
+  sentReorder: "Print what was sent + reorder missing",
+  originals: "Print original sizes + reorder missing",
+};
+const ANSWER_KEY = new Map(Object.entries(ANSWERS).map(([k, v]) => [v.toLowerCase(), k]));
+export function answerKeyOf(answer, answerField) {
+  if (!answerField) return "sent";
+  return ANSWER_KEY.get(String(answer || "").trim().toLowerCase()) || "waiting";
+}
+/** How many of a size to print (and so to catch), by the customer's answer. */
+export function expectedQty(ordered, received, key) {
+  if (key === "sent") return received;
+  if (key === "sentReorder") return Math.max(ordered, received);
+  return ordered; // originals, waiting
+}
 export const MAX_TEXT = 32000;
 const LINE_RE = /^(.+?): (.+?) · (.+?), (\d{1,2}\/\d{1,2}\/\d{4})(?: · (.*))?$/;
 const PAIR_RE = /^(\S{1,12}) (\d{1,4})→(\d{1,4})$/;
@@ -65,7 +86,7 @@ export function formatLine(label, pairs, by, date, note) {
  * order says) and its `qty` becomes what was received, so "left", totals, warnings and Finish all count
  * against what arrived. Each changed line gets `changed: { pairs, by, date, note }`.
  */
-export function applySizeChanges(lines, text) {
+export function applySizeChanges(lines, text, key = "sent") {
   if (!text) return;
   const labels = lineLabels(lines);
   for (const e of parseSizeChanges(text)) {
@@ -78,11 +99,12 @@ export function applySizeChanges(lines, text) {
       const s = line.sizes.find((x) => x.size === p.size);
       if (!s) continue;
       if (s.ordered == null) s.ordered = s.qty;
-      s.qty = p.received;
-      pairs.push({ size: s.size, ordered: s.ordered, received: s.qty });
+      s.received = p.received;                         // what arrived (kept for the form)
+      s.qty = expectedQty(s.ordered, p.received, key); // what to catch
+      pairs.push({ size: s.size, ordered: s.ordered, received: p.received });
     }
     if (!pairs.length) continue;
-    line.changed = { pairs, by: e.by, date: e.date, note: e.note };
+    line.changed = { pairs, by: e.by, date: e.date, note: e.note, key, waiting: key === "waiting" };
     line.total = line.sizes.reduce((a, s) => a + s.qty, 0);
   }
 }

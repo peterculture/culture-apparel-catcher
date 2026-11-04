@@ -18,7 +18,7 @@
 import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder, stripItems } from "./_orders.js";
-import { SIZE_CHANGES_FIELD, MAX_TEXT, lineLabels, formatLine, replaceLine, shopDate, oneLine } from "./_sizechanges.js";
+import { SIZE_CHANGES_FIELD, ANSWER_FIELD, ANSWERS, MAX_TEXT, lineLabels, formatLine, replaceLine, shopDate, oneLine } from "./_sizechanges.js";
 
 const HTTP_DATE = (iso) => new Date(iso).toUTCString();
 
@@ -56,7 +56,7 @@ export async function onRequestPost({ request, env }) {
         const pairs = [];
         for (const s of line.sizes) {
           const ordered = s.ordered != null ? s.ordered : s.qty;
-          const got = Object.prototype.hasOwnProperty.call(received, s.size) ? received[s.size] : s.qty;
+          const got = Object.prototype.hasOwnProperty.call(received, s.size) ? received[s.size] : (s.received != null ? s.received : s.qty);
           if (got !== ordered) pairs.push({ size: s.size, ordered, received: got });
         }
         if (pairs.length && note.length < 3) {
@@ -75,7 +75,13 @@ export async function onRequestPost({ request, env }) {
         const resp = await sfFetch(env, `/services/data/${apiVersion(env)}/sobjects/Order/${order.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json", "If-Unmodified-Since": HTTP_DATE(order.lastModified) },
-          body: JSON.stringify({ [SIZE_CHANGES_FIELD]: text || null }),
+          body: JSON.stringify(Object.assign({ [SIZE_CHANGES_FIELD]: text || null },
+            /* 11-04: where the org has the customer's-answer field (shared with The Forge), a change
+               saved here is one the customer OK'd -- "Print what was sent" -- unless the account
+               manager already answered. No size changes left: no answer either. */
+            order.sizeSwapAnswer == null ? {}
+              : !text ? (order.sizeSwapAnswer ? { [ANSWER_FIELD]: null } : {})
+              : !order.sizeSwapAnswer ? { [ANSWER_FIELD]: ANSWERS.sent } : {})),
         });
         if (resp.status === 412) continue;   // someone changed the order a moment ago: read again, apply on top
         if (resp.status !== 204) {

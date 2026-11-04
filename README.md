@@ -375,3 +375,11 @@ Setup: in Salesforce Setup create the Order field **Size Changes** (Long Text Ar
 `Size_Changes__c`), add it to the Order layout, then run `tools/catcher-size-changes.apex`.
 Until the field exists and is readable, the button stays hidden and nothing else is affected.
 Code: `functions/api/_sizechanges.js`, `functions/api/size-change.js`.
+
+**Shared with The Forge (11-04).** The Forge's garment station writes the same field: receiving records
+what arrived, and the account manager picks the customer's answer in an optional Order picklist
+**Size Swap Answer** (`Size_Swap_Answer__c`): *Print what was sent* / *Print what was sent + reorder
+missing* / *Print original sizes + reorder missing*. Where that field exists the Catch counts by it
+(no answer yet = the order as sold, tagged "WRONG SIZES · WAITING ON ACCOUNT MANAGER"), and a change
+saved here sets *Print what was sent* if nobody has answered. Without the field (production today) every
+line means *Print what was sent*, as before.

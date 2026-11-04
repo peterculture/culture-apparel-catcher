@@ -1196,6 +1196,43 @@ await test("Sizes changed: supplier sent other sizes, customer OK'd (11-04)", as
   ok(/" of " \+ s\.qty/.test(js) && /<s>' \+ s\.ordered/.test(js), "Log Box shows 'N of received left'; the order shows the ordered number crossed out");
 });
 
+await test("Sizes changed + the customer's answer, shared with The Forge (11-04)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const om = await mod("_orders"); om._resetOptionalOff();
+  const O = "801000000000001AAA";
+  const line = "Navy Gildan 5000 Tee: M 20→12, L 24→36 · Kim, 11/4/2026 · S&S swap";
+  const one = async () => (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json()).orders.find((o) => o.id === O);
+  const sz = (o, k) => o.lines[0].sizes.find((s) => s.size === k);
+  db.orders.forEach((o) => { o.Size_Changes__c = null; });
+  db.orders[0].Size_Changes__c = line; db.orders[0].Size_Swap_Answer__c = null;
+  let o = await one();
+  ok(o.sizeSwapAnswer === "" && sz(o, "M").qty === 20 && sz(o, "L").qty === 24 && o.lines[0].changed && o.lines[0].changed.waiting, "receiving recorded it, no answer yet -> catch the order as sold, tagged waiting");
+  ok(sz(o, "M").received === 12 && sz(o, "L").received === 36, "...and what arrived is kept for the form");
+  db.orders[0].Size_Swap_Answer__c = "Print what was sent";
+  o = await one();
+  ok(sz(o, "M").qty === 12 && sz(o, "L").qty === 36 && !o.lines[0].changed.waiting, "Print what was sent -> catch what arrived");
+  db.orders[0].Size_Swap_Answer__c = "Print what was sent + reorder missing";
+  o = await one();
+  ok(sz(o, "M").qty === 20 && sz(o, "L").qty === 36, "Print what was sent + reorder missing -> M stays 20 (8 more coming), L 36");
+  db.orders[0].Size_Swap_Answer__c = "Print original sizes + reorder missing";
+  o = await one();
+  ok(sz(o, "M").qty === 20 && sz(o, "L").qty === 24, "Print original sizes + reorder missing -> the order as sold");
+  // A change saved on the Catch is one the customer OK'd: answer set only when blank.
+  db.orders[0].Size_Changes__c = null; db.orders[0].Size_Swap_Answer__c = null;
+  let r = await szc.onRequestPost({ request: req("POST", "/api/size-change", { orderId: O, line: 0, received: { M: 12, L: 36 }, note: "Customer OK'd", requestId: "req-sa000001" }, cookie), env });
+  ok(r.status === 200 && db.orders[0].Size_Swap_Answer__c === "Print what was sent", "Catch save sets 'Print what was sent' where the field exists and is blank");
+  db.orders[0].Size_Swap_Answer__c = "Print what was sent + reorder missing";
+  r = await szc.onRequestPost({ request: req("POST", "/api/size-change", { orderId: O, line: 0, received: { M: 11 }, note: "Recounted", requestId: "req-sa000002" }, cookie), env });
+  ok(r.status === 200 && db.orders[0].Size_Swap_Answer__c === "Print what was sent + reorder missing" && /M 20→11, L 24→36/.test(db.orders[0].Size_Changes__c), "an account manager's answer is kept; a size left out keeps what arrived");
+  r = await szc.onRequestPost({ request: req("POST", "/api/size-change", { orderId: O, line: 0, received: { M: 20, L: 24 }, requestId: "req-sa000003" }, cookie), env });
+  ok(r.status === 200 && db.orders[0].Size_Changes__c === null && db.orders[0].Size_Swap_Answer__c === null, "put back -> line and answer cleared");
+  delete db.orders[0].Size_Swap_Answer__c;
+  const lib = szlib;
+  ok(lib.answerKeyOf(null, false) === "sent" && lib.expectedQty(20, 12, "sentReorder") === 20 && lib.ANSWERS.originals === "Print original sizes + reorder missing", "answer values match The Forge's _size-swap.js");
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  ok(/WAITING ON ACCOUNT MANAGER/.test(js) && /s\.received != null \? s\.received : s\.qty/.test(js), "tablet: waiting tag; the form starts from what arrived");
+});
+
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
   reset(); const env = ENV(); const c = await signIn(env, "4821");
   behave.noDeliveryField = true;
