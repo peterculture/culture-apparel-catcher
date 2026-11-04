@@ -29,6 +29,8 @@ const bedit = await mod("box-edit");
 const bdel = await mod("box-delete");
 const bug = await mod("bug-report");
 const bdelm = await mod("box-delete-many");
+const szc = await mod("size-change");
+const szlib = await mod("_sizechanges");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -95,6 +97,7 @@ globalThis.fetch = async (url, init = {}) => {
     if (/FROM Order WHERE/.test(q)) {
       if (behave.queryFail) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column" }]);
       if (behave.queryBusy) return res(503, [{ errorCode: "SERVER_UNAVAILABLE", message: "Server busy, try later" }]);
+      if (behave.noSizeField && /Size_Changes__c/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column 'Size_Changes__c' on entity 'Order'. If you are attempting to use a custom field, be sure to append the '__c'" }]);
       if (behave.noDeliveryField && /Shipping_Delivery__c/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column 'Shipping_Delivery__c' on entity 'Order'" }]);
       const idm = q.match(/AND Id = '([^']+)'/);
       const carry = /Packaging_Count__c = null/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : "";
@@ -1135,6 +1138,62 @@ await test("Boxes like this: Log Box saves N identical boxes at once, all or non
   ok(r.status === 201 && d.box && !d.boxes && db.boxes.length === n0 + 4 && !posts("/composite/sobjects").some((x) => x === undefined), "no copies -> one box, as before");
   const js = readFileSync(join(root, "app.js"), "utf8");
   ok(/data-k="copies"/.test(js) && /BOXES LIKE THIS/.test(js) && /payload\.copies = n/.test(js) && /copies: "1"/.test(js), "the form has the tile, sends copies only when more than 1, and a new box starts at 1");
+});
+
+await test("Sizes changed: supplier sent other sizes, customer OK'd (11-04)", async () => {
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  const om = await mod("_orders"); om._resetOptionalOff();
+  const O = "801000000000001AAA";
+  const board = async () => (await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env })).json());
+  const save = (body, id) => szc.onRequestPost({ request: req("POST", "/api/size-change", Object.assign({ orderId: O, line: 0, requestId: id }, body), cookie), env });
+  // 1. Field not created yet: the board still loads, the button stays hidden, a save says so.
+  behave.noSizeField = true;
+  let b = await board();
+  ok(b.orders && b.orders.length === 2 && b.orders[0].sizeChangesText === null, "Size Changes field missing -> board loads, field marked not readable");
+  let r = await save({ received: { M: 12 }, note: "Supplier sent L" }, "req-sz000001"); let d = await r.json();
+  ok(r.status === 409 && d.error === "not_set_up", "save before the field exists -> 409 with the reason");
+  behave.noSizeField = false; om._resetOptionalOff();
+  // 2. Field exists (empty).
+  db.orders.forEach((o) => { o.Size_Changes__c = null; });
+  b = await board();
+  ok(b.orders[0].sizeChangesText === "", "field readable and empty");
+  r = await save({ received: { M: 12, L: 36 } }, "req-sz000002"); d = await r.json();
+  ok(r.status === 400 && d.error === "need_note", "a change needs a reason");
+  r = await save({ received: { XL: 3 }, note: "x y z" }, "req-sz000003"); d = await r.json();
+  ok(r.status === 400 && d.error === "bad_size", "a size not on this garment -> refused");
+  r = await save({ received: { M: -1 }, note: "x y z" }, "req-sz000004");
+  ok(r.status === 400, "negative -> refused");
+  behave.patch412 = 1;   // someone else saved the order a moment ago: read again, then save
+  r = await save({ received: { M: 12, L: 36 }, note: "Supplier sent L instead of M.\nCustomer OK'd · print it" }, "req-sz000005"); d = await r.json();
+  const text = db.orders[0].Size_Changes__c;
+  ok(r.status === 200 && d.ok && d.pairs.length === 2, "saved (after one 412 retry)");
+  ok(/^Navy Gildan 5000 Tee: M 20→12, L 24→36 · Maria R\., \d{1,2}\/\d{1,2}\/\d{4} · Supplier sent L instead of M\. Customer OK'd - print it$/.test(text), "one readable line in Size Changes -> " + text);
+  const l0 = d.order.lines[0], M = l0.sizes.find((s) => s.size === "M"), L = l0.sizes.find((s) => s.size === "L"), S = l0.sizes.find((s) => s.size === "S");
+  ok(M.qty === 12 && M.ordered === 20 && L.qty === 36 && L.ordered === 24 && S.ordered === undefined && S.qty === 12, "counts against what arrived; sizes keep what was ordered");
+  ok(l0.total === 60 && l0.changed && l0.changed.by === "Maria R." && l0.changed.pairs.length === 2, "garment total 60 (12 + 12 + 36) and the change is attached");
+  ok(!db.items.some((i) => i.Quantity === 36 || i.Quantity === 12 && i.Size__c === "M"), "order products are not changed");
+  r = await save({ received: { M: 12, L: 36 }, note: "Supplier sent L instead of M.\nCustomer OK'd · print it" }, "req-sz000005");
+  ok(r.status === 200 && db.orders[0].Size_Changes__c === text, "double tap: same answer, nothing new");
+  b = await board();
+  const bo = b.orders.find((o) => o.id === O);
+  ok(bo.lines[0].sizes.find((s) => s.size === "L").qty === 36 && bo.total === 60, "every tablet reads it back (order total 60: what arrived)");
+  // 3. Hand-typed notes and other garments are kept; an edit replaces only this garment's line.
+  db.orders[0].Size_Changes__c = "Called the customer 11/3, they said fine\n" + text;
+  r = await save({ received: { M: 15, L: 33 }, note: "Recounted the box" }, "req-sz000006"); d = await r.json();
+  const t2 = db.orders[0].Size_Changes__c.split("\n");
+  ok(r.status === 200 && t2.length === 2 && t2[0] === "Called the customer 11/3, they said fine" && /^Navy Gildan 5000 Tee: M 20→15, L 24→33 /.test(t2[1]), "edit replaces this garment's line, keeps a hand-typed line");
+  // 4. Back to what was ordered = the line is removed.
+  r = await save({ received: { M: 20, L: 24 } }, "req-sz000007"); d = await r.json();
+  ok(r.status === 200 && d.cleared && db.orders[0].Size_Changes__c === "Called the customer 11/3, they said fine", "put back -> this garment's line removed (no reason needed)");
+  ok(!d.order.lines[0].changed && d.order.lines[0].sizes.every((s) => s.ordered === undefined), "and the app counts against the order again");
+  r = await szc.onRequestPost({ request: req("POST", "/api/size-change", { orderId: O, line: 0, received: { M: 1 }, note: "abc", requestId: "req-sz000008" }), env });
+  ok(r.status === 401, "needs a sign-in");
+  // parser
+  const parsed = szlib.parseSizeChanges("Black Comfort Colors 1717: M 6→3, L 10→13 · Titus, 11/4/2026 · Supplier sent 3 more L\nsomething else");
+  ok(parsed[0].label === "Black Comfort Colors 1717" && parsed[0].pairs[1].received === 13 && parsed[0].by === "Titus" && parsed[0].note === "Supplier sent 3 more L" && parsed[1].raw === "something else" && !parsed[1].label, "the Size Changes line format reads back (and other text is left alone)");
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  ok(/data-act="sz-open"/.test(js) && /SIZES CHANGED\?/.test(js) && /sz: "\/api\/size-change"/.test(js) && /canSz = o\.sizeChangesText != null/.test(js), "tablet: button per garment, hidden until the field can be read, saves to /api/size-change");
+  ok(/" of " \+ s\.qty/.test(js) && /<s>' \+ s\.ordered/.test(js), "Log Box shows 'N of received left'; the order shows the ordered number crossed out");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {

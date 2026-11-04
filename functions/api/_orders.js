@@ -22,6 +22,7 @@
 import { runQuery, soqlQuote, plainText, SfError, SF_ID } from "./_sf.js";
 import { SIZE_FIELD, parseBreakdown } from "./_sizes.js";
 import { COUNTED_BY_FIELD } from "./_boxes.js";
+import { SIZE_CHANGES_FIELD, applySizeChanges } from "./_sizechanges.js";
 
 export const DEFAULT_PRINTERS = ["Culture Apparel", "Culture Apparel Press 2"];
 
@@ -63,20 +64,38 @@ export function deliveryOf(row) {
   if (!v) return { key: "none", label: "NO DELIVERY METHOD" };
   return DELIVERY[v] || { key: "other", label: plainText(v).toUpperCase().slice(0, 30) };
 }
-/** SELECT Order rows, with Delivery Method when it can be read. */
+/* Optional Order fields, each read only while the app's login can see it (11-04: Size Changes joined
+ * Delivery Method). Salesforce answers INVALID_FIELD for the whole query when one is missing, so the
+ * field it names is left out for 10 minutes and the query runs again; the board never goes down
+ * for a field that isn't set up yet (11-02 lesson). */
+const OPTIONAL_FIELDS = [
+  { field: DELIVERY_FIELD, what: "Delivery Method (badges hidden)", off: 0 },
+  { field: SIZE_CHANGES_FIELD, what: "Size Changes (sizes-changed notes not shown or saved)", off: 0 },
+];
+export function _resetOptionalOff() { for (const o of OPTIONAL_FIELDS) o.off = 0; deliveryOffUntil = 0; }
+/** SELECT Order rows, with the optional fields that can be read. */
 async function selectOrders(env, rest) {
-  const withDelivery = Date.now() >= deliveryOffUntil;
-  const fields = withDelivery ? [...ORDER_FIELDS, DELIVERY_FIELD] : ORDER_FIELDS;
-  try {
-    return await runQuery(env, `SELECT ${fields.join(", ")} FROM Order WHERE ${rest}`);
-  } catch (err) {
-    if (!withDelivery || !(err instanceof SfError) || err.detail !== "INVALID_FIELD") throw err;
-    // Was it this field? Only if the same query works without it.
-    const rows = await runQuery(env, `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${rest}`);
-    console.warn("Delivery Method not readable by the app's login (run tools/catcher-app-access.apex); badges hidden for 10 minutes");
-    deliveryOffUntil = Date.now() + 10 * 60 * 1000;
-    return rows;
+  for (let attempt = 0; attempt < OPTIONAL_FIELDS.length + 1; attempt++) {
+    const now = Date.now();
+    const on = OPTIONAL_FIELDS.filter((o) => now >= o.off && (o.field !== DELIVERY_FIELD || now >= deliveryOffUntil));
+    const fields = [...ORDER_FIELDS, ...on.map((o) => o.field)];
+    try {
+      return await runQuery(env, `SELECT ${fields.join(", ")} FROM Order WHERE ${rest}`);
+    } catch (err) {
+      if (!on.length || !(err instanceof SfError) || err.detail !== "INVALID_FIELD") throw err;
+      const named = on.filter((o) => String(err.message || "").includes(o.field));
+      let rows = null;
+      // Salesforce didn't say which field: only blame the optional ones if the query works without them.
+      if (!named.length) rows = await runQuery(env, `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${rest}`);
+      for (const o of (named.length ? named : on)) {
+        o.off = Date.now() + 10 * 60 * 1000;
+        if (o.field === DELIVERY_FIELD) deliveryOffUntil = o.off;
+        console.warn(`${o.field} not readable by the app's login (run tools/catcher-app-access.apex): ${o.what} for 10 minutes`);
+      }
+      if (rows) return rows;
+    }
   }
+  return runQuery(env, `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${rest}`);
 }
 
 /* Product Family (Product2.Family, for box names, 11-02) is read only if the app's login can see it.
@@ -278,6 +297,9 @@ async function buildOrders(env, orders) {
       const s = line.sizes.find((x) => x.size === c.size);
       if (s) s.boxed += c.qty;
     }
+    // SIZES CHANGED (11-04): the sizes that arrived replace the ordered ones for counting (sizes keep `ordered`).
+    const sizeChangesReadable = SIZE_CHANGES_FIELD in o;
+    applySizeChanges(lines, o[SIZE_CHANGES_FIELD]);
     return {
       id: o.Id,
       num: plainText(o.GOA_Order_Number__c) || o.OrderNumber,
@@ -299,6 +321,7 @@ async function buildOrders(env, orders) {
       // Activated (Status Sent Tracking or later): Salesforce locks the order and its lines.
       activated: o.StatusCode === "Activated",
       lines,
+      sizeChangesText: sizeChangesReadable ? (o[SIZE_CHANGES_FIELD] || "") : null,   // null = field not readable
       total: lines.reduce((a, l) => a + l.total, 0),
       extraBoxed,
       boxes: orderBoxes,

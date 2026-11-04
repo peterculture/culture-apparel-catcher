@@ -356,3 +356,22 @@ the Boxes / Boxed / Misprints numbers and the box rows sit on the background). T
 photos (header strip, order-list banner, sign-in screen) all stay. All of it is one block at the end of `app.css` ("ROOMIER LAYOUT") plus `--hdr: 86px`, which the order
 screen, forms, mockup viewer and toasts use for the header height. Delete that block and set `--hdr` back to 78px
 (and `.hdr` height to 76px) to undo.
+
+## Sizes changed (11-04)
+
+Sometimes the supplier sends different sizes than were ordered (ordered M 24 / L 24, got M 12 / L 36) and
+the customer says "print what you got". Each garment on an order now has a **SIZES CHANGED?** button:
+
+- Type how many of each size actually arrived and write why (required, 3–200 characters), then SAVE.
+- The app writes one line per garment to the order's **Size Changes** field (`Order.Size_Changes__c`,
+  Long Text), e.g. `Black Comfort Colors 1717: M 6→3, L 10→13 · Titus, 11/4/2026 · Customer OK'd`.
+- From then on "left", totals, warnings and Finish count against what arrived. The order's products,
+  prices and invoices are never changed. Changed sizes show the ordered count struck through, the card
+  gets a SIZES CHANGED tag, and Log Box shows the change above that garment.
+- EDIT reopens it; putting every size back to what was ordered removes the line.
+- Lines typed by hand in Salesforce that don't fit the pattern are kept and ignored.
+
+Setup: in Salesforce Setup create the Order field **Size Changes** (Long Text Area, 32,768, API name
+`Size_Changes__c`), add it to the Order layout, then run `tools/catcher-size-changes.apex`.
+Until the field exists and is readable, the button stays hidden and nothing else is affected.
+Code: `functions/api/_sizechanges.js`, `functions/api/size-change.js`.

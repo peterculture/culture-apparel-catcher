@@ -41,7 +41,8 @@
     signoutMsg: "",
     help: null,            // { text, sending, sent, emailed, err } while the Help pop-up is open (11-02)
     picking: null,         // { orderId, ids: { boxId: true } } while SELECT is on under "Boxes on this order" (11-02)
-    delMany: null          // { ids: [boxId..], requestId } while the "delete N boxes" dialog is open
+    delMany: null,         // { ids: [boxId..], requestId } while the "delete N boxes" dialog is open
+    sz: null               // { line, vals: {size: "n"}, sel, fresh, note, requestId } while SIZES CHANGED is open (11-04)
   };
 
   var $app = document.getElementById("app");
@@ -144,6 +145,7 @@
   }
   function garmentWordOf(name) { return String(name || "").replace(/\s+\d+$/, "").trim() || "Box"; }
   var ICON = {
+    swap: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>',
     x: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     back: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg>',
     box: '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/></svg>',
@@ -336,7 +338,7 @@
     state.user = null; state.logoutPending = null; state.q = "";
     state.orders = []; state.selId = null; state.past = []; state.pastSelId = null;
     state.scr = { board: freshScreen(), past: freshScreen() };
-    state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null; state.picking = null; state.delMany = null;
+    state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null; state.picking = null; state.delMany = null; state.sz = null;
     state.pending = null; state.saving = false; state.pin = ""; state.pinErr = ""; state.mode = "board"; state.view = "list";
     clearTimeout(toastTimer); state.toast = null; state.help = null; helpDraft = "";
     state.signoutMsg = reason === "expired" ? "Your sign-in ended." : "";
@@ -682,7 +684,7 @@
       var tag = open ? '<span class="tag edit">' + open + (open === 1 ? " BOX" : " BOXES") + " EDITABLE</span>" : '<span class="tag lock">READ-ONLY · PAST 7 DAYS</span>';
       return '<button class="card" data-act="pick" data-id="' + esc(o.id) + '" data-q="' + esc(searchKey(o)) + '" aria-pressed="' + (o.id === state.pastSelId) + '">' +
         '<span class="thumb">' + ICON.box + "</span>" +
-        '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
+        '<span class="card-body"><span class="card-num">' + esc(o.num) + (o.lines.some(function (l) { return l.changed; }) ? '<span class="sz-tag small">SIZES CHANGED</span>' : "") + "</span>" +
         '<span class="card-cust">' + esc(o.customer) + "</span>" + deliveryBadge(o) +
         '<span class="card-meta">' + o.boxes.length + (o.boxes.length === 1 ? " box" : " boxes") + (o.lastBoxAt ? " · last box " + esc(fmtDate(o.lastBoxAt)) + " " + esc(fmtTime(o.lastBoxAt)) : "") + "</span>" + tag + "</span></button>";
     }).join("");
@@ -718,7 +720,7 @@
         : o.finished ? '<span class="tag done">✓ COUNTED · ' + o.finishedCount + (o.finishedCount === 1 ? " BOX" : " BOXES") + "</span>" : "";
       return '<button class="card' + (o.inProduction ? "" : " moved") + '" data-act="pick" data-id="' + esc(o.id) + '" data-q="' + esc(searchKey(o)) + '" aria-pressed="' + sel + '">' +
         '<span class="thumb">' + thumb + "</span>" +
-        '<span class="card-body"><span class="card-num">' + esc(o.num) + "</span>" +
+        '<span class="card-body"><span class="card-num">' + esc(o.num) + (o.lines.some(function (l) { return l.changed; }) ? '<span class="sz-tag small">SIZES CHANGED</span>' : "") + "</span>" +
         '<span class="card-cust">' + esc(o.customer) + "</span>" + deliveryBadge(o) +
         progressHtml(o) + tag + "</span></button>";
     }).join("");
@@ -757,16 +759,24 @@
     var mock = o.hasMockup
       ? '<button class="mock" data-act="mock" data-id="' + esc(o.id) + '" aria-label="Open the mockup full size"><img class="mock-img" alt="Mockup for ' + esc(o.num) + '" data-mock="' + esc(o.id) + ':0"><span class="mock-wait mock-none">LOADING<br>MOCKUP…</span><span class="badge">' + ICON.expand + '</span><span class="cap">' + ((o.mockupCount || 1) > 1 ? "TAP TO SEE ALL " + o.mockupCount : "TAP TO ENLARGE") + '</span></button>'
       : '<div class="mock"><span class="mock-none">NO MOCKUP<br>IN SALESFORCE</span></div>';
-    var lines = o.lines.map(function (l) {
-      return '<div><div class="line-head"><span>' + esc(l.product) + (l.color ? " · " + esc(l.color) : "") + '</span><span class="tot">' + l.total + "</span></div>" +
+    var canSz = o.sizeChangesText != null;   // the Size Changes field is set up and readable
+    var lines = o.lines.map(function (l, li) {
+      var szHead = l.changed ? '<span class="sz-tag">SIZES CHANGED</span>'
+        : canSz && l.sizes.length ? '<button class="sz-btn" data-act="sz-open" data-i="' + li + '">' + ICON.swap + "SIZES CHANGED?</button>" : "";
+      var szNote = l.changed ? '<div class="sz-note"><div class="sz-note-text"><span>' + (l.changed.note ? "“" + esc(l.changed.note) + "”" : "Sizes changed.") + "</span>" +
+        "<small>" + esc(l.changed.by) + " · " + esc(l.changed.date) + "</small></div>" +
+        (canSz ? '<button class="log-btn" data-act="sz-open" data-i="' + li + '">EDIT</button>' : "") + "</div>" : "";
+      return '<div><div class="line-head"><span class="line-name">' + esc(l.product) + (l.color ? " · " + esc(l.color) : "") + "</span>" + szHead + '<span class="tot">' + l.total + "</span></div>" +
         '<div class="sizes">' + l.sizes.map(function (s) {
           // Misprinted / damaged so far on this size (stored on the order line; the Production Error screen starts from it).
           var bad = (s.misprinted || 0) + (s.damaged || 0);
-          return '<div class="size"><div class="s">' + esc(s.size) + '</div><div class="q">' + s.qty + "</div>" +
+          var chg = s.ordered != null && s.ordered !== s.qty;
+          return '<div class="size' + (chg ? " chg" : "") + '"><div class="s">' + esc(s.size) + '</div><div class="q">' + s.qty + "</div>" +
+            (chg ? '<div class="was"><s>' + s.ordered + "</s> ordered</div>" : "") +
             (bad ? '<div class="mp" title="' + (s.misprinted || 0) + " misprinted, " + (s.damaged || 0) + ' damaged">' + bad + " BAD</div>" : "") + "</div>";
         }).join("") + (l.extras || []).map(function (e) {
           return '<div class="size extra" title="Extra: not on the order"><div class="s">' + esc(e.size) + ' · EXTRA</div><div class="q">+' + e.boxed + "</div></div>";
-        }).join("") + "</div></div>";
+        }).join("") + "</div>" + szNote + "</div>";
     }).join("");
     var log = boxRowsHtml(o, true);
     var misLog = o.misprintNotes ? '<div class="sec-label" style="margin-top:.6rem">MISPRINT NOTES IN SALESFORCE</div><div class="notes">' + esc(o.misprintNotes.split(" | ").join("\n")) + "</div>" : "";
@@ -820,6 +830,70 @@
         (open ? " · can be changed until " + esc(fmtWhen(b.editableUntil)) : " · read-only since " + esc(fmtWhen(b.editableUntil))) + "</span></span>" +
         '<span class="log-btns">' + btns + "</span></div>";
     }).join("");
+  }
+
+  /* ----------------------------------------------------- sizes changed --- */
+  /* SIZES CHANGED (11-04, from the approved "The Catch: Sizes Changed" mockup): the supplier sent
+     different sizes, the customer OK'd printing what arrived. For one garment the catcher types how
+     many of each size arrived, and why; /api/size-change writes it to the order's Size Changes field,
+     and from then on the app counts that garment against what arrived. Order products never change. */
+  function szOrdered(s) { return s.ordered != null ? s.ordered : s.qty; }
+  function szDiffs(o) {
+    var z = state.sz, l = o && o.lines[z.line];
+    if (!l) return [];
+    return l.sizes.map(function (s) {
+      var v = z.vals[s.size], got = v === "" || v == null ? null : parseInt(v, 10);
+      return { size: s.size, ordered: szOrdered(s), received: got };
+    }).filter(function (d) { return d.received !== null && d.received !== d.ordered; });
+  }
+  function openSizes(o, li) {
+    var l = o.lines[li]; if (!l) return;
+    var vals = {};
+    l.sizes.forEach(function (s) { vals[s.size] = String(s.qty); });
+    state.sz = { line: li, vals: vals, sel: l.sizes[0] ? l.sizes[0].size : null, fresh: true, note: l.changed ? l.changed.note || "" : "", requestId: newRequestId() };
+    state.sheet = "sz"; state.toast = null; renderToast(); renderOverlay();
+  }
+  function szSaveLabel(o) {
+    var z = state.sz, l = o.lines[z.line];
+    var diffs = szDiffs(o), blank = l.sizes.some(function (s) { return z.vals[s.size] === ""; }), noteOk = z.note.trim().length >= 3;
+    var label = state.saving ? '<span class="spin"></span>SAVING…'
+      : blank ? "TYPE A NUMBER FOR EVERY SIZE"
+      : diffs.length && !noteOk ? "WRITE WHY BELOW"
+      : diffs.length ? "SAVE SIZE CHANGE · " + diffs.map(function (d) { var n = d.received - d.ordered; return esc(d.size) + " " + (n > 0 ? "+" + n : "−" + (-n)); }).join(", ")
+      : l.changed ? "PUT BACK TO THE ORDERED SIZES" : "NO SIZES CHANGED YET";
+    return { label: label, ready: !state.saving && !blank && (diffs.length ? noteOk : !!l.changed) };
+  }
+  function szSheetHtml(o) {
+    var z = state.sz, l = o.lines[z.line];
+    if (!l) return "";
+    var ordT = 0, gotT = 0;
+    var rows = l.sizes.map(function (s) {
+      var ord = szOrdered(s), v = z.vals[s.size], got = v === "" ? null : parseInt(v, 10);
+      ordT += ord; gotT += got || 0;
+      var d = got === null ? null : got - ord, sel = z.sel === s.size;
+      var change = got === null ? '<span class="sz-same">type a number</span>' : d === 0 ? '<span class="sz-same">same</span>'
+        : '<span class="sz-diff">' + (d > 0 ? "+" + d + " · " + d + " more" : "−" + (-d) + " · " + (-d) + " fewer") + "</span>";
+      return '<div class="sz-row' + (d ? " on" : "") + '"><span class="sz-size">' + esc(s.size) + '</span><span class="sz-ord">' + ord + "</span>" +
+        '<button class="sz-cell' + (d ? " on" : "") + '" data-act="sz-cell" data-k="' + esc(s.size) + '" aria-pressed="' + sel + '" aria-label="' + esc(s.size) + " received: " + (v === "" ? "blank" : v) + '">' + (v === "" ? "—" : esc(v)) + "</button>" + change + "</div>";
+    }).join("");
+    var totNote = gotT === ordT ? "same total, different sizes" : gotT > ordT ? (gotT - ordT) + " more in all" : (ordT - gotT) + " fewer in all";
+    var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "<"].map(function (k) {
+      var lab = k === "<" ? "⌫" : k === "C" ? "CLR" : k;
+      return '<button data-act="sz-key" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '" aria-label="' + (k === "<" ? "Delete last digit" : k === "C" ? "Clear" : k) + '">' + lab + "</button>";
+    }).join("");
+    var sv = szSaveLabel(o);
+    return '<div class="scrim"><div class="sheet wide sz-sheet" role="dialog" aria-label="Sizes changed">' +
+      '<div class="sheet-head"><div class="sheet-title"><h2 class="sz-title">SIZES CHANGED · ' + esc(o.num) + "</h2>" +
+      "<p>" + esc((l.color ? l.color + " · " : "") + l.product) + " · type how many of each size actually arrived</p></div>" +
+      '<button class="x" data-act="close" aria-label="Close"' + (state.saving ? " disabled" : "") + ">" + ICON.x + "</button></div>" +
+      '<div class="row2"><div class="grow sz-table"><div class="sz-row sz-headrow"><span>SIZE</span><span>ORDERED</span><span>RECEIVED</span><span>CHANGE</span></div>' + rows +
+      '<div class="sz-row sz-total"><span>TOTAL</span><span class="sz-ord">' + ordT + '</span><span class="sz-tot">' + gotT + '</span><span class="sz-same">' + totNote + "</span></div></div>" +
+      '<div class="pad-wrap"><div class="pad-for">RECEIVED FOR <b>' + esc(z.sel || "") + '</b></div><div class="pad">' + keys + "</div>" +
+      '<div class="quick"><button class="chip" data-act="sz-next">Next size →</button></div></div></div>' +
+      '<div class="sz-why"><label for="sz-note" class="sec-label">WHY? · SAVED TO SALESFORCE WITH THE SIZES</label>' +
+      '<textarea id="sz-note" class="note-in" rows="2" maxlength="200" placeholder="e.g. Supplier sent 3 more L and 3 fewer M. Customer OK’d printing what we got.">' + esc(z.note) + "</textarea></div>" +
+      '<div class="save-row sz-save-row"><button class="save alt" data-act="close"' + (state.saving ? " disabled" : "") + ">CANCEL</button>" +
+      '<button class="save sz-save' + (state.saving ? " busy" : "") + '" data-act="sz-save"' + (sv.ready ? "" : " disabled") + ">" + sv.label + "</button></div></div></div>";
   }
 
   /* ---------------------------------------------- select + delete boxes -- */
@@ -1065,8 +1139,9 @@
       var cells = l.sizes.map(function (s) {
         var k = cellKey(li, s.size), v = b.cells[k] || "", q = parseInt(v || "0", 10) || 0, left = sizeLeft(s) + (orig[k] || 0);
         lineCount += q;
-        return '<button class="cell' + (q ? " has" : "") + (q > left ? " over" : "") + '" data-act="box-cell" data-k="' + esc(k) + '" aria-pressed="' + (b.sel === k) + '" aria-label="' + esc(s.size) + ", " + q + ' counted">' +
-          '<span class="s">' + esc(s.size) + '</span><span class="q">' + (v || "0") + '</span><span class="left">' + Math.max(0, left) + " left</span></button>";
+        var chg = s.ordered != null && s.ordered !== s.qty;   // SIZES CHANGED: counting against what arrived
+        return '<button class="cell' + (q ? " has" : "") + (q > left ? " over" : "") + (chg ? " chg" : "") + '" data-act="box-cell" data-k="' + esc(k) + '" aria-pressed="' + (b.sel === k) + '" aria-label="' + esc(s.size) + ", " + q + ' counted">' +
+          '<span class="s">' + esc(s.size) + '</span><span class="q">' + (v || "0") + '</span><span class="left">' + Math.max(0, left) + (chg ? " of " + s.qty : "") + " left</span></button>";
       }).join("");
       // Extras: sizes not on the order (already boxed on it, or added just now with + ADD MORE).
       cells += extrasFor(o, b, li).map(function (sz) {
@@ -1090,7 +1165,8 @@
           '<button class="chip" data-act="add-other">ADD</button><button class="chip" data-act="add-cancel">CANCEL</button></div>' +
           '<div class="hint">Pick a size, then type how many on the number pad. Extras of a size that\'s already on the order: just count them in that size.</div></div>';
       }
-      return '<div class="gl"><div class="gl-head">' + esc((l.color ? l.color + " · " : "") + l.product) + "<span>" + (lineCount ? lineCount + " in box" : "") + "</span></div>" +
+      var szTag = l.changed ? ' <em class="sz-tag small">SIZES CHANGED · ' + l.changed.pairs.map(function (p) { return esc(p.size) + " " + p.ordered + "→" + p.received; }).join(" · ") + "</em>" : "";
+      return '<div class="gl"><div class="gl-head">' + esc((l.color ? l.color + " · " : "") + l.product) + szTag + "<span>" + (lineCount ? lineCount + " in box" : "") + "</span></div>" +
         '<div class="cells">' + cells + "</div>" + picker + "</div>";
     }).join("");
     if (!o.lines.length) groups = '<div class="hint">This order has no garment sizes in Salesforce, so sizes can\'t be counted. Tell a manager.</div>';
@@ -1271,7 +1347,7 @@
       if (from.getAttribute(a.name) !== v) from.setAttribute(a.name, v);
     }
     if (from.nodeName === "INPUT" || from.nodeName === "TEXTAREA") {
-      var want = to.getAttribute("value") || "";
+      var want = from.nodeName === "TEXTAREA" ? to.value : (to.getAttribute("value") || "");   // a textarea's text is its content
       if (document.activeElement !== from && from.value !== want) from.value = want;   // never fight the person typing
       return;
     }
@@ -1285,9 +1361,9 @@
     if (!state.user || !state.sheet || !o) { $overlay.innerHTML = ""; $overlay.removeAttribute("data-shown"); return; }
     if (state.sheet === "mock") { $overlay.innerHTML = viewerHtml(o); $overlay.removeAttribute("data-shown"); fillMockups($overlay); setupViewer(); return; }
     var html = state.sheet === "box" ? boxSheetHtml(o) : state.sheet === "mis" ? misSheetHtml(o) : state.sheet === "fin" ? finSheetHtml(o)
-      : state.sheet === "dup" ? dupSheetHtml(o) : state.sheet === "del" ? delSheetHtml(o) : state.sheet === "delmany" && state.delMany ? delManySheetHtml(o) : "";
+      : state.sheet === "dup" ? dupSheetHtml(o) : state.sheet === "del" ? delSheetHtml(o) : state.sheet === "delmany" && state.delMany ? delManySheetHtml(o) : state.sheet === "sz" && state.sz ? szSheetHtml(o) : "";
     // Which form for which order/box: a different one is drawn fresh; the same one is updated in place.
-    var key = state.sheet + ":" + o.id + ":" + (state.box && state.box.requestId || "") + (state.dup ? ":" + state.dup.requestId : "") + (state.del ? ":" + state.del.requestId : "") + (state.delMany ? ":" + state.delMany.requestId : "");
+    var key = state.sheet + ":" + o.id + ":" + (state.box && state.box.requestId || "") + (state.dup ? ":" + state.dup.requestId : "") + (state.del ? ":" + state.del.requestId : "") + (state.delMany ? ":" + state.delMany.requestId : "") + (state.sheet === "sz" && state.sz ? ":" + state.sz.requestId : "");
     var old = $overlay.firstElementChild;
     if (old && $overlay.getAttribute("data-shown") === key) {
       var tmp = document.createElement("div"); tmp.innerHTML = html;
@@ -1416,7 +1492,7 @@
     opts = opts || {};
     state.saving = true; state.pending = { kind: kind, payload: payload, opts: opts };
     state.toast = null; renderToast(); renderOverlay();
-    var path = { box: "/api/boxes", fin: "/api/finish", dup: "/api/duplicate-box", edit: "/api/box-edit", del: "/api/box-delete", delmany: "/api/box-delete-many" }[kind] || "/api/misprints";
+    var path = { box: "/api/boxes", fin: "/api/finish", dup: "/api/duplicate-box", edit: "/api/box-edit", del: "/api/box-delete", delmany: "/api/box-delete-many", sz: "/api/size-change" }[kind] || "/api/misprints";
     api("POST", path, payload).then(function (r) {
       state.saving = false;
       if (!state.user) return;
@@ -1466,6 +1542,13 @@
             state.orders = state.orders.filter(function (x) { return x.id !== o.id; });
             state.selId = state.orders.length ? state.orders[0].id : null; state.view = "list";
           }
+        } else if (kind === "sz" && o) {
+          if (r.data.order) for (var zi = 0; zi < state.orders.length; zi++) if (state.orders[zi].id === r.data.order.id) { state.orders[zi] = r.data.order; o = r.data.order; }
+          var zl = o.lines[r.data.line != null ? r.data.line : (state.sz ? state.sz.line : 0)], zname = zl ? (zl.color ? zl.color + " " : "") + zl.product : "";
+          if (r.data.unchanged) showToast({ kind: "ok", title: "NOTHING TO CHANGE", body: "Those sizes are already saved on " + o.num + "." });
+          else if (r.data.cleared) showToast({ kind: "ok", title: "SIZES PUT BACK", body: zname + " on " + o.num + " is counted against the ordered sizes again. Removed from Size Changes in Salesforce." });
+          else showToast({ kind: "ok", title: "SIZE CHANGE SAVED", body: zname + ": " + (r.data.pairs || []).map(function (p) { return p.size + " " + p.ordered + "→" + p.received; }).join(", ") + ". Saved to Size Changes on " + o.num + " in Salesforce." });
+          state.sz = null;
         } else if (kind === "mis" && o && r.data.misprint) {
           o.misprintTotal = r.data.misprintTotal;
           var mp = r.data.misprint;
@@ -1665,6 +1748,26 @@
       state.del = { boxId: b.id, requestId: newRequestId() };
       state.sheet = "del"; state.toast = null; renderToast(); renderOverlay();
     },
+    "sz-open": function (el) { var o = current(); if (o && !state.saving) openSizes(o, parseInt(el.getAttribute("data-i"), 10) || 0); },
+    "sz-cell": function (el) { var z = state.sz; if (!z) return; var k = el.getAttribute("data-k"); if (z.sel !== k) z.fresh = true; z.sel = k; renderOverlay(); },
+    "sz-key": function (el) {
+      var z = state.sz; if (!z || !z.sel) return;
+      var k = el.getAttribute("data-k"), v = z.vals[z.sel] || "";
+      if (z.fresh) { v = ""; z.fresh = false; }          // the first digit replaces what was there
+      if (k === "C") v = ""; else if (k === "<") v = v.slice(0, -1); else if (v.length < 4) v = (v === "0" ? "" : v) + k;
+      z.vals[z.sel] = v; renderOverlay();
+    },
+    "sz-next": function () {
+      var o = current(), z = state.sz; if (!o || !z) return;
+      var sizes = o.lines[z.line].sizes.map(function (s) { return s.size; }), i = sizes.indexOf(z.sel);
+      z.sel = sizes[(i + 1) % sizes.length]; z.fresh = true; renderOverlay();
+    },
+    "sz-save": function () {
+      var o = current(), z = state.sz; if (!o || !z) return;
+      var received = {};
+      o.lines[z.line].sizes.forEach(function (s) { var v = z.vals[s.size]; if (v !== "" && v != null) received[s.size] = parseInt(v, 10); });
+      send("sz", { orderId: o.id, line: z.line, received: received, note: z.note.trim(), requestId: z.requestId });
+    },
     "pick-start": function () {
       var o = current(); if (!o || state.saving) return;
       state.picking = { orderId: o.id, ids: {} }; renderMain();
@@ -1707,7 +1810,7 @@
       state.mis = { line: 0, size: null, qty: 1, reason: null, note: "", requestId: newRequestId() };
       state.sheet = "mis"; state.toast = null; renderToast(); renderOverlay();
     },
-    close: function () { if (state.saving) return; state.sheet = null; state.delMany = null; renderOverlay(); },
+    close: function () { if (state.saving) return; state.sheet = null; state.delMany = null; state.sz = null; renderOverlay(); },
     "box-type": function (el) { state.box.type = el.getAttribute("data-v"); renderOverlay(); },
     "box-cell": function (el) {
       var k = el.getAttribute("data-k");
@@ -1822,6 +1925,11 @@
   });
   document.addEventListener("input", function (e) {
     if (e.target && e.target.id === "mis-note" && state.mis) state.mis.note = e.target.value.slice(0, 80);
+    if (e.target && e.target.id === "sz-note" && state.sz) {
+      state.sz.note = e.target.value.slice(0, 200);
+      var sb = document.querySelector("[data-act=sz-save]"), o2 = current();   // only the button changes while typing
+      if (sb && o2) { var sv = szSaveLabel(o2); sb.disabled = !sv.ready; sb.innerHTML = sv.label; }
+    }
     if (e.target && e.target.id === "extra-size" && state.box && state.box.adding) state.box.adding.text = e.target.value.slice(0, 10);
     if (e.target && e.target.id === "order-search") { state.q = e.target.value.slice(0, 60); applySearch(); }
     if (e.target && e.target.id === "help-what" && state.help) {
@@ -1842,7 +1950,7 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && state.help) { closeHelp(); return; }
-    if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; state.delMany = null; renderOverlay(); return; }
+    if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; state.delMany = null; state.sz = null; renderOverlay(); return; }
     if (e.key === "Escape" && state.picking && !state.saving) { state.picking = null; renderMain(); return; }
     if ((e.key === " " || e.key === "Enter") && e.target && e.target.getAttribute && e.target.getAttribute("data-act") === "pick-box") { e.preventDefault(); handlers["pick-box"](e.target); }
   });
