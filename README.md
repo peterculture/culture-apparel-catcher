@@ -274,6 +274,12 @@ Every order card and the order header show the order's **Delivery Method** (`Ord
 PICKUP, FULFILLMENT (Order Fulfillment), SHIPPING, DELIVERY, SPLIT SHIP, or NO DELIVERY METHOD when it's blank.
 The label carries the meaning; each method also has its own color.
 
+**Fix (11-11): badges missing in Production since 11-04.** Production has no `Size_Swap_Answer__c`.
+Salesforce's "No such column" error also repeats part of the query
+(`Shipping_Delivery__c, Size_Changes__c, Size_Swap_Answer__c FROM Order …`). The app used to blame every
+optional field named anywhere in that message, so it switched Delivery Method and Size Changes off too,
+every 10 minutes. It now blames only the field in `No such column '…'` (`missingFields()` in `_orders.js`).
+
 ## Activated orders and FINISH CATCHING (10-30)
 
 Salesforce activates an order when its Status moves to **Sent Tracking**, and then only users with

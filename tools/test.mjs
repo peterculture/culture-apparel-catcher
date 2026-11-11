@@ -99,6 +99,8 @@ globalThis.fetch = async (url, init = {}) => {
       if (behave.queryBusy) return res(503, [{ errorCode: "SERVER_UNAVAILABLE", message: "Server busy, try later" }]);
       if (behave.noSizeField && /Size_Changes__c/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column 'Size_Changes__c' on entity 'Order'. If you are attempting to use a custom field, be sure to append the '__c'" }]);
       if (behave.noDeliveryField && /Shipping_Delivery__c/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "No such column 'Shipping_Delivery__c' on entity 'Order'" }]);
+      // Salesforce's real wording (Production, 11-11): the error echoes part of the query, other field names included.
+      if (behave.noAnswerField && /Size_Swap_Answer__c/.test(q)) return res(400, [{ errorCode: "INVALID_FIELD", message: "\nShipping_Delivery__c, Size_Changes__c, Size_Swap_Answer__c FROM Order WHERE\n                                       ^\nERROR at Row:1:Column:64\nNo such column 'Size_Swap_Answer__c' on entity 'Order'. If you are attempting to use a custom field, be sure to append the '__c' after the custom field name. Please reference your WSDL or the describe call for the appropriate names." }]);
       const idm = q.match(/AND Id = '([^']+)'/);
       const carry = /Packaging_Count__c = null/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : "";
       const review = !/Order_Substatus__c = 'Production'/.test(q) ? (q.match(/Id IN \(([^)]*)\)/) || [, ""])[1] : null;
@@ -943,6 +945,25 @@ await test("Delivery Method badge: read from Order.Shipping_Delivery__c", async 
   if (ful && byId[ful.Id]) ok(byId[ful.Id].key === "fulfillment" && byId[ful.Id].label === "FULFILLMENT", "Order Fulfillment -> FULFILLMENT badge");
   const blank = db.orders.find((o) => o.Shipping_Delivery__c == null && byId[o.Id]);
   if (blank) ok(byId[blank.Id].key === "none", "blank -> NO DELIVERY METHOD");
+});
+
+await test("One missing optional field doesn't hide the others (11-11: Size_Swap_Answer__c not in Production)", async () => {
+  reset(); const env = ENV(); const c = await signIn(env, "4821");
+  const om = await mod("_orders"); om._resetOptionalOff();
+  db.orders[0].Shipping_Delivery__c = "Pickup"; db.orders[0].Size_Changes__c = "Navy Gildan 5000 Tee: M 20→18 · Maria, 11/4/2026 · supplier short";
+  behave.noAnswerField = true;
+  ok(JSON.stringify(om.missingFields("x Shipping_Delivery__c, Size_Swap_Answer__c FROM Order\nNo such column 'Size_Swap_Answer__c' on entity 'Order'.")) === '["Size_Swap_Answer__c"]', "missingFields reads only \"No such column '…'\"");
+  for (let round = 1; round <= 2; round++) {
+    const r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, c), env });
+    const o = (await r.json()).orders.find((x) => x.id === db.orders[0].Id);
+    // The pretend Salesforce returns every field, so check what was asked for: real Salesforce only sends selected fields.
+    const sel = decodeURIComponent(calls.filter((x) => /FROM Order WHERE/.test(decodeURIComponent(x.url))).pop().url);
+    ok(r.status === 200 && /Shipping_Delivery__c/.test(sel) && o && o.delivery && o.delivery.label === "PICKUP", `refresh ${round}: Delivery Method still read (PICKUP badge)`);
+    ok(/Size_Changes__c/.test(sel) && o && /M 20→18/.test(o.sizeChangesText || ""), `refresh ${round}: Size Changes still read`);
+  }
+  const qs = calls.filter((x) => /FROM Order WHERE/.test(decodeURIComponent(x.url))).map((x) => decodeURIComponent(x.url));
+  ok(/Shipping_Delivery__c/.test(qs[qs.length - 1]) && !/Size_Swap_Answer__c/.test(qs[qs.length - 1]), "later queries keep Delivery Method and leave out only Size Swap Answer");
+  behave.noAnswerField = false; om._resetOptionalOff();
 });
 
 await test("Activated order: FINISH CATCHING lets it go when Salesforce refuses the count (10-30)", async () => {

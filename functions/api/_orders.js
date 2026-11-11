@@ -73,6 +73,18 @@ const OPTIONAL_FIELDS = [
   { field: SIZE_CHANGES_FIELD, what: "Size Changes (sizes-changed notes not shown or saved)", off: 0 },
   { field: ANSWER_FIELD, what: "Size Swap Answer (size changes read as 'print what was sent')", off: 0 },
 ];
+/** The field(s) Salesforce says are missing, from "No such column 'X' on entity 'Order'" only.
+ * 11-11 fix: the error also echoes part of the query ("Shipping_Delivery__c, Size_Changes__c,
+ * Size_Swap_Answer__c FROM Order ..."), so looking for field names anywhere in the message blamed
+ * every optional field: one missing field (Size_Swap_Answer__c, not in Production) hid the Delivery
+ * Method badges and Size Changes too, every 10 minutes, for good. */
+export function missingFields(message) {
+  const out = [];
+  const re = /No such column '([^']+)'/g;
+  let m;
+  while ((m = re.exec(String(message || "")))) out.push(m[1]);
+  return out;
+}
 export function _resetOptionalOff() { for (const o of OPTIONAL_FIELDS) o.off = 0; deliveryOffUntil = 0; }
 /** SELECT Order rows, with the optional fields that can be read. */
 async function selectOrders(env, rest) {
@@ -84,7 +96,7 @@ async function selectOrders(env, rest) {
       return await runQuery(env, `SELECT ${fields.join(", ")} FROM Order WHERE ${rest}`);
     } catch (err) {
       if (!on.length || !(err instanceof SfError) || err.detail !== "INVALID_FIELD") throw err;
-      const named = on.filter((o) => String(err.message || "").includes(o.field));
+      const named = on.filter((o) => missingFields(err.message).includes(o.field));
       let rows = null;
       // Salesforce didn't say which field: only blame the optional ones if the query works without them.
       if (!named.length) rows = await runQuery(env, `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${rest}`);
