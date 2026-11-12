@@ -31,6 +31,7 @@ const bug = await mod("bug-report");
 const bdelm = await mod("box-delete-many");
 const szc = await mod("size-change");
 const szlib = await mod("_sizechanges");
+const sfenv = await mod("sf-env");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -245,6 +246,7 @@ async function signIn(env, pin = "4821") {
   const set = r.headers.get("Set-Cookie") || "";
   return set.split(";")[0];
 }
+async function _resetOptional() { (await mod("_orders"))._resetOptionalOff(); }
 const posts = (p) => calls.filter((c) => c.method !== "GET" && c.url.includes(p));
 
 /* ---------------- tests ---------------- */
@@ -1252,6 +1254,104 @@ await test("Sizes changed + the customer's answer, shared with The Forge (11-04)
   ok(lib.answerKeyOf(null, false) === "sent" && lib.expectedQty(20, 12, "sentReorder") === 20 && lib.ANSWERS.originals === "Print original sizes + reorder missing", "answer values match The Forge's _size-swap.js");
   const js = readFileSync(join(root, "app.js"), "utf8");
   ok(/WAITING ON ACCOUNT MANAGER/.test(js) && /s\.received != null \? s\.received : s\.qty/.test(js), "tablet: waiting tag; the form starts from what arrived");
+});
+
+/* ---------------- Salesforce org switcher (11-12): live site locked to Production, preview switchable ---------------- */
+const PREVIEW = () => Object.assign(ENV(), {
+  SF_ENV_SWITCH: "on", SF_DEFAULT_ENV: "staging", SF_ENV_SWITCH_PIN: "2468",
+  SF_ENV_STAGING_LOGIN_URL: "https://staging.example", SF_ENV_STAGING_CLIENT_ID: "sid", SF_ENV_STAGING_CLIENT_SECRET: "ssec",
+  SF_ENV_DEV2_LOGIN_URL: "https://dev2.example", SF_ENV_DEV2_CLIENT_ID: "did", SF_ENV_DEV2_CLIENT_SECRET: "dsec",
+});
+const tokenHosts = () => calls.filter((c) => c.url.endsWith("/services/oauth2/token")).map((c) => new URL(c.url).host);
+function reqOrg(method, path, body, cookie, org) {
+  const r = req(method, path, body, cookie);
+  const h = new Headers(r.headers); h.set("X-Catch-Org", org);
+  return new Request(r.url, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
+}
+
+await test("Org switcher: the live site is always Production, whatever KV says (11-12)", async () => {
+  reset(); const env = ENV();
+  // Sandbox logins and a KV value pointing at staging must change nothing on the live site.
+  Object.assign(env, { SF_ENV_STAGING_LOGIN_URL: "https://staging.example", SF_ENV_STAGING_CLIENT_ID: "s", SF_ENV_STAGING_CLIENT_SECRET: "s" });
+  await env.CATCHER_KV.put("sf_env:active", "staging");
+  let g = await (await sfenv.onRequestGet({ request: req("GET", "/api/sf-env"), env })).json();
+  ok(g.active === "production" && g.switchable === false && g.environments.length === 0, "GET: production, not switchable");
+  const c = await signIn(env);
+  const r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, c), env });
+  const b = await r.json();
+  ok(r.status === 200 && b.org === "production", "orders come from Production");
+  ok(tokenHosts().every((h) => h === "login.example"), "only the Production login is used");
+  const p = await sfenv.onRequestPost({ request: req("POST", "/api/sf-env", { env: "staging", pin: "2468" }, c), env });
+  ok(p.status === 403 && (await p.json()).error === "switch_off", "POST refused on the live site");
+  ok([...env.CATCHER_KV._m.keys()].includes("board:seen") && ![...env.CATCHER_KV._m.keys()].some((k) => k.startsWith("board:seen:")), "board memory keeps its original key on Production");
+  const me1 = await (await me.onRequestGet({ request: req("GET", "/api/me", null, c), env })).json();
+  ok(me1.org && me1.org.key === "production" && me1.org.switchable === false, "/api/me says Production, not switchable");
+});
+
+await test("Org switcher: the preview starts on its home org and lists only sandboxes as choices", async () => {
+  reset(); const env = PREVIEW();
+  const g = await (await sfenv.onRequestGet({ request: req("GET", "/api/sf-env"), env })).json();
+  ok(g.active === "staging" && g.switchable === true, "starts on SF_DEFAULT_ENV (staging)");
+  const byKey = Object.fromEntries(g.environments.map((e) => [e.key, e]));
+  ok(byKey.production && byKey.production.selectable === false, "Production is never selectable on the preview, even with its login set");
+  ok(byKey.dev2.selectable === true && byKey.staging.active === true, "dev2 selectable, staging active");
+  const c = await signIn(env);
+  const b = await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, c), env })).json();
+  ok(b.org === "staging" && b.orgLabel === "Staging", "orders say which org");
+  ok(tokenHosts().length > 0 && tokenHosts().every((h) => h === "staging.example"), "signs in to staging only");
+  ok([...env.CATCHER_KV._m.keys()].includes("board:seen:staging") && !env.CATCHER_KV._m.has("board:seen"), "board memory is kept per org");
+});
+
+await test("Org switcher: switching needs sign-in + the switch PIN, tries the login first, then every request follows", async () => {
+  reset(); const env = PREVIEW();
+  let r = await sfenv.onRequestPost({ request: req("POST", "/api/sf-env", { env: "dev2", pin: "2468" }), env });
+  ok(r.status === 401, "not signed in -> 401");
+  const c = await signIn(env);
+  r = await sfenv.onRequestPost({ request: req("POST", "/api/sf-env", { env: "dev2", pin: "1111" }, c), env });
+  ok(r.status === 401 && (await r.json()).error === "wrong_pin", "wrong switch PIN refused");
+  r = await sfenv.onRequestPost({ request: req("POST", "/api/sf-env", { env: "production", pin: "2468" }, c), env });
+  ok(r.status === 409, "Production refused on the preview");
+  ok(!env.CATCHER_KV._m.has("sf_env:active"), "nothing switched yet");
+  behave.loginRefuse = true;
+  r = await sfenv.onRequestPost({ request: req("POST", "/api/sf-env", { env: "dev2", pin: "2468" }, c), env });
+  ok(r.status === 502 && !env.CATCHER_KV._m.has("sf_env:active"), "a login that fails -> 502, still on staging");
+  behave.loginRefuse = false;
+  r = await sfenv.onRequestPost({ request: req("POST", "/api/sf-env", { env: "dev2", pin: "2468" }, c), env });
+  const j = await r.json();
+  ok(r.status === 200 && j.active === "dev2" && j.before === "staging" && env.CATCHER_KV._m.get("sf_env:active") === "dev2", "switched to dev2");
+  calls.length = 0;
+  const b = await (await orders.onRequestGet({ request: req("GET", "/api/orders", null, c), env })).json();
+  ok(b.org === "dev2" && tokenHosts().every((h) => h === "dev2.example"), "the next load comes from dev2");
+  // A save from a screen still showing staging is refused before anything reaches Salesforce.
+  calls.length = 0;
+  r = await boxes.onRequestPost({ request: reqOrg("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", counts: [{ line: 0, size: "M", qty: 5 }], requestId: "req-org00001" }, c, "staging"), env });
+  const e = await r.json();
+  ok(r.status === 409 && e.error === "org_changed" && e.org === "dev2", "save from the old org's screen -> 409 org_changed");
+  ok(calls.length === 0, "nothing sent to Salesforce");
+});
+
+await test("Org switcher: a field missing in one org is only left out in that org", async () => {
+  reset(); await _resetOptional();
+  const pv = PREVIEW(); const cp = await signIn(pv);
+  behave.noDeliveryField = true;
+  let r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cp), env: pv });
+  ok(r.status === 200, "staging board loads without Delivery Method");
+  behave.noDeliveryField = false;
+  calls.length = 0;
+  const live = ENV(); const cl = await signIn(live);
+  r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cl), env: live });
+  ok(r.status === 200, "Production board loads");
+  const q = calls.filter((x) => x.url.includes("/query") && /FROM\+Order\+WHERE|FROM%20Order%20WHERE/.test(x.url)).map((x) => decodeURIComponent(x.url));
+  ok(q.length > 0 && q.every((x) => /Shipping_Delivery__c/.test(x)), "Production still asks for Delivery Method (staging's missing field didn't turn it off there)");
+  await _resetOptional();
+});
+
+await test("Org switcher: the tablet shows the org and sends it with every save", async () => {
+  const js = readFileSync(join(root, "app.js"), "utf8"), html = readFileSync(join(root, "index.html"), "utf8");
+  ok(/id="org-chip"/.test(html) && /id="orgsw"/.test(html), "header chip + switcher container");
+  ok(/"X-Catch-Org": state\.org\.key/.test(js), "saves carry X-Catch-Org");
+  ok(/r\.data\.org !== state\.org\.key\) \{ orgChanged/.test(js), "a list from another org starts the tablet over");
+  ok(/e\.key !== "production"/.test(js), "the switcher never offers Production");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {

@@ -11,7 +11,7 @@
  * 2026-10-29): a cancelled request would leave everyone waiting on it. On one
  * tablet the small card and the big picture already share one download.
  */
-import { json, errorResponse, SF_ID } from "./_sf.js";
+import { json, errorResponse, SF_ID, orgFor, orgOf } from "./_sf.js";
 import { requireUser } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
 import { mockupUrlsFor, mockupFilesFor, fetchMockup, fetchFileMockup } from "./_mockup.js";
@@ -26,7 +26,11 @@ function pictureResponse(pic) {
   });
 }
 
-export async function onRequestGet({ request, env, waitUntil }) {
+export async function onRequestGet({ request, env: siteEnv, waitUntil }) {
+  // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
+  const org = await orgFor(request, siteEnv);
+  if (org.response) return org.response;
+  const env = org.env;
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
   try {
@@ -36,7 +40,7 @@ export async function onRequestGet({ request, env, waitUntil }) {
     const n = Math.min(5, Math.max(0, parseInt(params.get("n") || "0", 10) || 0));  // which picture (0 = newest)
 
     const cache = typeof caches !== "undefined" ? caches.default : null;
-    const key = new Request(`https://mockup-cache.internal/${orderId}/${n}`);
+    const key = new Request(`https://mockup-cache.internal/${orgOf(env)}/${orderId}/${n}`);   // per org (11-12)
     if (cache) {
       const hit = await cache.match(key);
       if (hit) {

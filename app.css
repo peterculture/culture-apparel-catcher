@@ -625,3 +625,22 @@ html[data-ca-season] .ca-season-head { margin-bottom: 1.25rem; }
 .save.sz-save { background: var(--warn); color: #1a1205; }
 .save.sz-save:disabled { background: var(--surface-card); color: var(--text-muted); }
 @media (max-width: 700px) { .sz-row { grid-template-columns: 3.4rem 4.2rem 5.6rem minmax(0, 1fr); gap: .6rem; } }
+
+/* ---- Salesforce org switcher (11-12): only the PREVIEW site shows any of this. ----
+   The live Catch is always Production and never shows the chip. On the preview site the chip
+   says which sandbox it is on, the header gets an amber line, and tapping the chip (signed in)
+   opens the switcher. */
+.org-chip { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 54px; padding: 0 14px; border-radius: 14px;
+  background: var(--warn); color: #1a1205; border: 0; flex-shrink: 0; }
+.org-chip[hidden] { display: none; }
+.org-chip .org-k { font: 600 10px/1 'Oswald'; letter-spacing: .14em; }
+.org-chip .org-n { font: 700 17px/1 'Oswald'; letter-spacing: .08em; text-transform: uppercase; }
+body.org-test .hdr { box-shadow: inset 0 -4px 0 var(--warn); }
+.pin-org { padding: .5rem 1rem; border-radius: .7rem; background: var(--warn); color: #1a1205; font: 600 .95rem/1.2 'Oswald'; letter-spacing: .1em; text-align: center; }
+.orgsw-sheet { width: min(34rem, 100%); }
+.orgsw-sheet .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.orgsw-sheet .chip[aria-pressed="true"] { border-color: var(--warn); background: var(--warn-bg); color: var(--warn-soft); }
+.orgsw-sheet .chip small { display: block; font: 500 .8rem/1.2 'Archivo'; color: var(--text-muted); }
+.orgsw-sheet .dots { justify-content: center; min-height: 1.4rem; }
+.orgsw-sheet .pin-pad button { height: 4.2rem; }
+.orgsw-note { margin: 0; font: 500 .95rem/1.45 'Archivo'; color: var(--text-secondary); }

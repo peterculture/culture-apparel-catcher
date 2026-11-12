@@ -18,14 +18,18 @@
  *    2 minutes -- the tablet reloads the order so the catcher can see.
  *  - Only boxes Salesforce confirms are reported as created.
  */
-import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, SF_ID, SfError } from "./_sf.js";
+import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, SF_ID, SfError, orgFor } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
 import { boxFields, garmentWord, nextNames } from "./_boxes.js";
 
 export const MAX_DUPLICATES = 100;
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env: siteEnv }) {
+  // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
+  const org = await orgFor(request, siteEnv);
+  if (org.response) return org.response;
+  const env = org.env;
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
   try {

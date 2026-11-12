@@ -11,14 +11,18 @@
  * admin can restore them for 15 days. A finished order's Packaging Count is set to the new number
  * of boxes, as with a single delete.
  */
-import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
+import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID, SfError, orgFor } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadReviewOrder, canChange } from "./_orders.js";
 import { expired } from "./box-edit.js";
 
 export const MAX_DELETE = 100;
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env: siteEnv }) {
+  // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
+  const org = await orgFor(request, siteEnv);
+  if (org.response) return org.response;
+  const env = org.env;
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
   try {

@@ -19,7 +19,7 @@
  *   - Finished = Packaging_Count__c is filled in.
  * The crew is never blocked; nothing about their process changes.
  */
-import { runQuery, soqlQuote, plainText, SfError, SF_ID } from "./_sf.js";
+import { runQuery, soqlQuote, plainText, SfError, SF_ID, orgOf, orgKvKey } from "./_sf.js";
 import { SIZE_FIELD, parseBreakdown } from "./_sizes.js";
 import { COUNTED_BY_FIELD } from "./_boxes.js";
 import { SIZE_CHANGES_FIELD, ANSWER_FIELD, applySizeChanges, answerKeyOf } from "./_sizechanges.js";
@@ -27,7 +27,9 @@ import { SIZE_CHANGES_FIELD, ANSWER_FIELD, applySizeChanges, answerKeyOf } from 
 export const DEFAULT_PRINTERS = ["Culture Apparel", "Culture Apparel Press 2"];
 
 export function printerNames(env) {
-  const list = String(env.PRINTER_NAMES || "").split(",").map((s) => s.trim()).filter(Boolean);
+  // Per org first (SF_ENV_STAGING_PRINTER_NAMES ...), then the shared PRINTER_NAMES, then the two presses.
+  const own = env[`SF_ENV_${orgOf(env).toUpperCase()}_PRINTER_NAMES`];
+  const list = String(own || env.PRINTER_NAMES || "").split(",").map((s) => s.trim()).filter(Boolean);
   return list.length ? list : DEFAULT_PRINTERS;
 }
 
@@ -49,7 +51,6 @@ const ORDER_FIELDS = [
  * this field, Salesforce answers INVALID_FIELD, so the app leaves the field out for 10 minutes
  * and tries again (no redeploy needed once the script is run). */
 export const DELIVERY_FIELD = "Shipping_Delivery__c";
-let deliveryOffUntil = 0;
 const DELIVERY = {
   "Pickup": { key: "pickup", label: "PICKUP" },
   "Order Fulfillment": { key: "fulfillment", label: "FULFILLMENT" },
@@ -69,10 +70,14 @@ export function deliveryOf(row) {
  * field it names is left out for 10 minutes and the query runs again; the board never goes down
  * for a field that isn't set up yet (11-02 lesson). */
 const OPTIONAL_FIELDS = [
-  { field: DELIVERY_FIELD, what: "Delivery Method (badges hidden)", off: 0 },
-  { field: SIZE_CHANGES_FIELD, what: "Size Changes (sizes-changed notes not shown or saved)", off: 0 },
-  { field: ANSWER_FIELD, what: "Size Swap Answer (size changes read as 'print what was sent')", off: 0 },
+  { field: DELIVERY_FIELD, what: "Delivery Method (badges hidden)" },
+  { field: SIZE_CHANGES_FIELD, what: "Size Changes (sizes-changed notes not shown or saved)" },
+  { field: ANSWER_FIELD, what: "Size Swap Answer (size changes read as 'print what was sent')" },
 ];
+/* "Left out until" per org + field (11-12): each org has its own fields, so a field missing in
+   staging must not hide it on another org. */
+const optionalOff = new Map();
+const offKey = (env, field) => orgOf(env) + "|" + field;
 /** The field(s) Salesforce says are missing, from "No such column 'X' on entity 'Order'" only.
  * 11-11 fix: the error also echoes part of the query ("Shipping_Delivery__c, Size_Changes__c,
  * Size_Swap_Answer__c FROM Order ..."), so looking for field names anywhere in the message blamed
@@ -85,12 +90,12 @@ export function missingFields(message) {
   while ((m = re.exec(String(message || "")))) out.push(m[1]);
   return out;
 }
-export function _resetOptionalOff() { for (const o of OPTIONAL_FIELDS) o.off = 0; deliveryOffUntil = 0; }
+export function _resetOptionalOff() { optionalOff.clear(); }
 /** SELECT Order rows, with the optional fields that can be read. */
 async function selectOrders(env, rest) {
   for (let attempt = 0; attempt < OPTIONAL_FIELDS.length + 1; attempt++) {
     const now = Date.now();
-    const on = OPTIONAL_FIELDS.filter((o) => now >= o.off && (o.field !== DELIVERY_FIELD || now >= deliveryOffUntil));
+    const on = OPTIONAL_FIELDS.filter((o) => now >= (optionalOff.get(offKey(env, o.field)) || 0));
     const fields = [...ORDER_FIELDS, ...on.map((o) => o.field)];
     try {
       return await runQuery(env, `SELECT ${fields.join(", ")} FROM Order WHERE ${rest}`);
@@ -101,9 +106,8 @@ async function selectOrders(env, rest) {
       // Salesforce didn't say which field: only blame the optional ones if the query works without them.
       if (!named.length) rows = await runQuery(env, `SELECT ${ORDER_FIELDS.join(", ")} FROM Order WHERE ${rest}`);
       for (const o of (named.length ? named : on)) {
-        o.off = Date.now() + 10 * 60 * 1000;
-        if (o.field === DELIVERY_FIELD) deliveryOffUntil = o.off;
-        console.warn(`${o.field} not readable by the app's login (run tools/catcher-app-access.apex): ${o.what} for 10 minutes`);
+        optionalOff.set(offKey(env, o.field), Date.now() + 10 * 60 * 1000);
+        console.warn(`[${orgOf(env)}] ${o.field} not readable by the app's login (run tools/catcher-app-access.apex): ${o.what} for 10 minutes`);
       }
       if (rows) return rows;
     }
@@ -116,11 +120,11 @@ async function selectOrders(env, rest) {
  * no Read on that field. So, like Delivery Method: if Salesforce says INVALID_FIELD, read the lines
  * again without it (box names fall back to the product name) and try again in 10 minutes.
  * tools/catcher-app-access.apex grants Read on it. */
-let familyOffUntil = 0;
+const familyOff = new Map();   // org -> left out until (ms)
 const ITEM_FIELDS = "Id, OrderId, Size__c, Color__c, Quantity, Product2.Name, Misprint_Quantity__c, Damaged_Quantity__c, LastModifiedDate";
 async function selectItems(env, ids) {
   const rest = ` FROM OrderItem WHERE OrderId IN (${ids}) ORDER BY CreatedDate ASC`;
-  const withFamily = Date.now() >= familyOffUntil;
+  const withFamily = Date.now() >= (familyOff.get(orgOf(env)) || 0);
   if (!withFamily) return runQuery(env, `SELECT ${ITEM_FIELDS}${rest}`);
   try {
     return await runQuery(env, `SELECT ${ITEM_FIELDS}, Product2.Family${rest}`);
@@ -128,11 +132,11 @@ async function selectItems(env, ids) {
     if (!(err instanceof SfError) || err.detail !== "INVALID_FIELD") throw err;
     const rows = await runQuery(env, `SELECT ${ITEM_FIELDS}${rest}`);
     console.warn("Product Family not readable by the app's login (run tools/catcher-app-access.apex); box names use the product name for 10 minutes");
-    familyOffUntil = Date.now() + 10 * 60 * 1000;
+    familyOff.set(orgOf(env), Date.now() + 10 * 60 * 1000);
     return rows;
   }
 }
-export function _resetFamilyOff() { familyOffUntil = 0; }
+export function _resetFamilyOff() { familyOff.clear(); }
 
 const SEEN_KEY = "board:seen";
 const SEEN_MS = 14 * 86400000;
@@ -146,7 +150,7 @@ const RELEASED_KEY = "board:released";
 async function readReleased(env) {
   if (!env.CATCHER_KV) return {};
   try {
-    const v = JSON.parse((await env.CATCHER_KV.get(RELEASED_KEY)) || "{}");
+    const v = JSON.parse((await env.CATCHER_KV.get(orgKvKey(env, RELEASED_KEY))) || "{}");
     return v && typeof v === "object" ? v : {};
   } catch (_) { return {}; }
 }
@@ -160,9 +164,9 @@ export async function releaseFromBoard(env, orderId) {
   for (const id of Object.keys(released)) if (Number(released[id]) > cutoff) next[id] = released[id];
   next[orderId] = Date.now();
   try {
-    await env.CATCHER_KV.put(RELEASED_KEY, JSON.stringify(next));
+    await env.CATCHER_KV.put(orgKvKey(env, RELEASED_KEY), JSON.stringify(next));
     const seen = await readSeen(env);
-    if (seen[orderId]) { delete seen[orderId]; await env.CATCHER_KV.put(SEEN_KEY, JSON.stringify(seen)); }
+    if (seen[orderId]) { delete seen[orderId]; await env.CATCHER_KV.put(orgKvKey(env, SEEN_KEY), JSON.stringify(seen)); }
     return true;
   } catch (err) { console.error("board:released write failed", err && err.message); return false; }
 }
@@ -171,7 +175,7 @@ export async function releaseFromBoard(env, orderId) {
 async function readSeen(env) {
   if (!env.CATCHER_KV) return {};
   try {
-    const v = JSON.parse((await env.CATCHER_KV.get(SEEN_KEY)) || "{}");
+    const v = JSON.parse((await env.CATCHER_KV.get(orgKvKey(env, SEEN_KEY))) || "{}");
     return v && typeof v === "object" ? v : {};
   } catch (_) { return {}; }
 }
@@ -186,7 +190,7 @@ async function writeSeen(env, seen, orders) {
   }
   const a = JSON.stringify(Object.keys(next).sort()), b = JSON.stringify(Object.keys(seen).sort());
   if (a === b) return;
-  try { await env.CATCHER_KV.put(SEEN_KEY, JSON.stringify(next)); } catch (err) { console.error("board:seen write failed", err && err.message); }
+  try { await env.CATCHER_KV.put(orgKvKey(env, SEEN_KEY), JSON.stringify(next)); } catch (err) { console.error("board:seen write failed", err && err.message); }
 }
 
 const SIZE_ORDER = ["YXS", "YS", "YM", "YL", "YXL", "XXS", "XS", "S", "M", "L", "XL", "2XL", "XXL", "3XL", "XXXL", "4XL", "5XL", "6XL", "OSFA", "OS"];

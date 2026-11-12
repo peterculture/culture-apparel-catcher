@@ -19,13 +19,17 @@
  *
  * Answers 201 only after Salesforce has confirmed the record(s) exist.
  */
-import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
+import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, sfErrorCode, SF_ID, SfError, orgFor } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
 import { boxFields, countsShapeError, checkCounts, garmentWord, nextNames } from "./_boxes.js";
 import { MAX_DUPLICATES } from "./duplicate-box.js";
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env: siteEnv }) {
+  // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
+  const org = await orgFor(request, siteEnv);
+  if (org.response) return org.response;
+  const env = org.env;
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
   try {

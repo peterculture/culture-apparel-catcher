@@ -217,6 +217,7 @@ functions/api/                  the server (Cloudflare Pages Functions)
   box-delete.js                 POST Delete Box (7-day window)
   finish.js                     POST finish catching (box count -> Packaging_Count__c)
   mockup.js                     GET  one order's mockup picture
+  sf-env.js                     GET/POST which Salesforce org (switching: preview site only, 11-12)
 tools/test.mjs                  offline tests against a pretend Salesforce
 ```
 
@@ -389,3 +390,48 @@ missing* / *Print original sizes + reorder missing*. Where that field exists the
 (no answer yet = the order as sold, tagged "WRONG SIZES · WAITING ON ACCOUNT MANAGER"), and a change
 saved here sets *Print what was sent* if nobody has answered. Without the field (production today) every
 line means *Print what was sent*, as before.
+
+## Preview site: Salesforce org switcher (11-12)
+
+For testing The Catch with The Forge. **The live Catch is not changed**: it always uses Production and
+shows no switcher. A second copy of the app, the **preview site**, runs from the `preview` branch on
+Cloudflare's *Preview* environment. It can be switched between **Dev2** and **Staging**, like The Forge.
+It can never use Production.
+
+**How it works**
+- The server picks the org once per request (`orgFor()` in `_sf.js`) and uses it for every read and save
+  in that request. Sign-ins, field fallbacks (Delivery Method, Size Changes, Product Family) and the
+  board's memory (`board:seen`, `board:released`) are kept per org. Production keeps its old KV keys.
+- Switching: tap the amber **PREVIEW · STAGING** chip in the header (signed in), pick the org, type the
+  switch PIN, **SWITCH**. The app tries the new org's login first; if it fails nothing changes. Every
+  tablet on the preview site follows (one KV value, `sf_env:active`, like The Forge).
+- A save from a screen still showing the old org is refused (`409 org_changed`, header `X-Catch-Org`),
+  and the tablet reloads from the new org. Nothing is saved to the wrong org.
+- The preview shows its org everywhere: the header chip, an amber line under the header, the PIN screen
+  ("PREVIEW · STAGING · TEST DATA, NOT THE SHOP FLOOR"), the tab title, and bug-report subjects.
+- `GET /api/sf-env` (no sign-in) says which org a site is on; `POST /api/sf-env` switches (preview only).
+
+**Cloudflare setup (once).** Pages project → Settings → *Variables and Secrets*, choose the **Preview**
+environment (the live site's **Production** variables stay exactly as they are):
+
+| Name | Value |
+|---|---|
+| `SF_ENV_SWITCH` | `on` |
+| `SF_DEFAULT_ENV` | `staging` |
+| `SF_ENV_SWITCH_PIN` | a PIN only you know (4–8 digits) |
+| `SF_ENV_STAGING_LOGIN_URL`, `SF_ENV_STAGING_CLIENT_ID`, `SF_ENV_STAGING_CLIENT_SECRET` | the same values as The Forge's |
+| `SF_ENV_DEV2_LOGIN_URL`, `SF_ENV_DEV2_CLIENT_ID`, `SF_ENV_DEV2_CLIENT_SECRET` | the same values as The Forge's |
+| `SESSION_SECRET` | a new 40+ character random string |
+| `CATCHER_PINS` | the PINs for whoever tests (can be the same list) |
+
+Bindings → **Preview** → KV namespace `CATCHER_KV`: bind a **new** namespace (e.g. `catcher-preview`), so
+the preview never shares PIN brakes, saved-request ids or board memory with the floor.
+Optional: `SF_ENV_STAGING_PRINTER_NAMES` / `SF_ENV_DEV2_PRINTER_NAMES` if a sandbox's presses are named
+differently from "Culture Apparel" / "Culture Apparel Press 2".
+
+Then push the `preview` branch. Cloudflare builds it at `https://preview.<catch-project>.pages.dev`.
+Settings → Builds → Branch control must allow preview branches (the default: all non-Production branches).
+
+**Logins:** the preview uses The Forge's sandbox connected apps, so it signs in as The Forge's
+integration user (wider access than Production's `Catcher_App_Access`). A permission problem that only
+Production's tighter login would hit won't show up on the preview.

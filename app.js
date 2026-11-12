@@ -42,13 +42,16 @@
     help: null,            // { text, sending, sent, emailed, err } while the Help pop-up is open (11-02)
     picking: null,         // { orderId, ids: { boxId: true } } while SELECT is on under "Boxes on this order" (11-02)
     delMany: null,         // { ids: [boxId..], requestId } while the "delete N boxes" dialog is open
-    sz: null               // { line, vals: {size: "n"}, sel, fresh, note, requestId } while SIZES CHANGED is open (11-04)
+    sz: null,              // { line, vals: {size: "n"}, sel, fresh, note, requestId } while SIZES CHANGED is open (11-04)
+    org: null,             // { key, label, switchable } -- which Salesforce this site is on (11-12)
+    orgsw: null            // { envs, pick, pin, busy, err } while the org switcher is open (preview site only)
   };
 
   var $app = document.getElementById("app");
   var $overlay = document.getElementById("overlay");
   var $toast = document.getElementById("toast");
   var $help = document.getElementById("help");
+  var $orgsw = document.getElementById("orgsw");
   var toastTimer = null;
 
   /* ------------------------------------------------------------ helpers -- */
@@ -277,7 +280,8 @@
     return trackRequest(fetch(path, {
       method: method,
       credentials: "same-origin",
-      headers: body ? { "Content-Type": "application/json" } : {},
+      // A save says which org the screen was showing; the server refuses it if the site switched since (11-12).
+      headers: Object.assign(body ? { "Content-Type": "application/json" } : {}, write && state.org && state.org.key ? { "X-Catch-Org": state.org.key } : {}),
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl ? ctrl.signal : undefined,
       cache: "no-store"
@@ -301,7 +305,7 @@
     var dot = document.getElementById("conn-dot"), label = document.getElementById("conn-label");
     var sc = state.user ? scrNow() : null, k = sc ? sc.s : "loading";
     dot.className = k === "live" ? "live" : (k === "stale" || k === "error") ? "down" : "";
-    label.textContent = k === "live" ? "Live · Salesforce" : k === "stale" ? "Offline · " + minutesOld(sc) + " m old" : k === "error" ? "Not connected" : "Connecting";
+    label.textContent = k === "live" ? "Live · " + (isTestOrg() ? state.org.label : "Salesforce") : k === "stale" ? "Offline · " + minutesOld(sc) + " m old" : k === "error" ? "Not connected" : "Connecting";
   }
 
   /* ------------------------------------------------------------ sign-in -- */
@@ -340,7 +344,7 @@
     state.scr = { board: freshScreen(), past: freshScreen() };
     state.sheet = null; state.box = null; state.mis = null; state.dup = null; state.del = null; state.fin = null; state.picking = null; state.delMany = null; state.sz = null;
     state.pending = null; state.saving = false; state.pin = ""; state.pinErr = ""; state.mode = "board"; state.view = "list";
-    clearTimeout(toastTimer); state.toast = null; state.help = null; helpDraft = "";
+    clearTimeout(toastTimer); state.toast = null; state.help = null; helpDraft = ""; state.orgsw = null; renderOrgSw();
     state.signoutMsg = reason === "expired" ? "Your sign-in ended." : "";
     if (state.draft) state.signoutMsg += " " + state.draft.user + "'s unsaved entries on " + state.draft.num + " are kept and reopen when " + firstName(state.draft.user) + " signs in again.";
     $overlay.removeAttribute("data-shown");
@@ -376,6 +380,8 @@
     var sc = state.scr[key], wasLive = sc.s === "live";
     return api("GET", key === "past" ? "/api/past-orders" : "/api/orders").then(function (r) {
       if (!state.user || r.status === 401) return;
+      // The preview site was switched to another org (by another tablet): start over on the new one.
+      if (r.ok && r.data.org && state.org && r.data.org !== state.org.key) { orgChanged(r.data.org, r.data.orgLabel, true); return; }
       if (r.ok && Array.isArray(r.data.orders)) {
         if (key === "past") {
           state.past = r.data.orders;
@@ -423,7 +429,8 @@
 
   function loadSetup() {
     return Promise.all([api("GET", "/api/me"), api("GET", "/api/box-types")]).then(function (rs) {
-      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; keepAwake(); }
+      if (rs[0].ok) { state.user = { name: rs[0].data.name }; state.reasons = rs[0].data.reasons || []; keepAwake();
+        if (rs[0].data.org) { state.org = rs[0].data.org; paintOrg(); } }
       if (rs[1].ok) state.boxTypes = rs[1].data.types || [];
     });
   }
@@ -650,6 +657,7 @@
     }).join("");
     return '<div class="pin-wrap ca-season-pin"><div class="pin-box">' +
       '<img class="pin-logo" src="/brand/catch-logo.png" alt="The Catch · Culture Apparel" width="623" height="636">' + seasonChip(false) +
+      (isTestOrg() ? '<div class="pin-org">PREVIEW · ' + esc(String(state.org.label).toUpperCase()) + " · TEST DATA, NOT THE SHOP FLOOR</div>" : "") +
       "<h1>WHO'S CATCHING?</h1><p>Enter your 4-digit PIN</p>" +
       (state.signoutMsg ? '<div class="pin-note">' + esc(state.signoutMsg) + "</div>" : "") +
       '<div class="dots" id="dots">' + dots + "</div>" +
@@ -1390,6 +1398,100 @@
   }
 
 
+  /* ------------------------------------------------- Salesforce org ---- */
+  /* 11-12 (Anthony): a PREVIEW Catch that can be switched between dev2 and staging, like The Forge,
+     to test the Catch with The Forge. The live Catch is always Production and shows none of this.
+     The server decides the org (functions/api/_sf.js); the tablet only shows it, sends it with every
+     save (a save made on a screen still showing the old org is refused), and starts over when it changes. */
+  function isTestOrg() { return !!(state.org && state.org.key && state.org.key !== "production"); }
+  function paintOrg() {
+    var chip = document.getElementById("org-chip"), show = !!(state.org && (state.org.switchable || isTestOrg()));
+    chip.hidden = !show;
+    if (show) document.getElementById("org-name").textContent = state.org.label || state.org.key;
+    document.body.classList.toggle("org-test", isTestOrg());
+    document.title = (isTestOrg() ? "[" + state.org.label + "] " : "") + "The Catch · Culture Apparel";
+  }
+  /** Ask the server which org this site is on (no sign-in needed: the PIN screen shows it too). */
+  function loadOrg() {
+    return api("GET", "/api/sf-env").then(function (r) {
+      if (r.ok && r.data && r.data.active) {
+        state.org = { key: r.data.active, label: r.data.label, switchable: !!r.data.switchable };
+        if (state.orgsw) { state.orgsw.envs = r.data.environments || []; renderOrgSw(); }
+        paintOrg(); if (!state.user) renderMain();
+      }
+      return r;
+    });
+  }
+  /** The site is on another org now: drop everything from the old one and load the new one. */
+  function orgChanged(key, label, tell) {
+    var was = state.org ? state.org.label : "";
+    state.org = Object.assign({}, state.org || {}, { key: key, label: label || key });
+    state.orders = []; state.past = []; state.selId = null; state.pastSelId = null; state.view = "list";
+    state.scr = { board: freshScreen(), past: freshScreen() };
+    state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null; state.del = null; state.delMany = null; state.sz = null;
+    state.picking = null; state.pending = null; state.draft = null; state.boxTypes = []; state.q = "";
+    Object.keys(mocks).forEach(function (id) { if (mocks[id].url) URL.revokeObjectURL(mocks[id].url); });
+    mocks = {};
+    paintOrg(); renderAll(); paintConn();
+    if (tell) showToast({ kind: "unsure", title: "NOW ON " + String(state.org.label).toUpperCase(), body: "This preview was switched" + (was ? " from " + was : "") + " to " + state.org.label + ". The lists are reloading from it." });
+    if (state.user) foregroundLoad(function () {
+      return Promise.all([api("GET", "/api/box-types").then(function (r) { if (r.ok) state.boxTypes = r.data.types || []; }),
+        state.mode === "past" ? loadPast() : loadOrders()]);
+    });
+  }
+
+  function openOrgSw() {
+    if (!state.org || !state.org.switchable) return;
+    if (!state.user) { showToast({ kind: "err", title: "SIGN IN FIRST", body: "Sign in with your PIN, then tap " + state.org.label + " to switch." }); return; }
+    if (state.saving) return;
+    state.orgsw = { envs: [], pick: null, pin: "", busy: false, err: "" };
+    renderOrgSw(); loadOrg();
+  }
+  function closeOrgSw() { if (state.orgsw && !state.orgsw.busy) { state.orgsw = null; renderOrgSw(); } }
+  function renderOrgSw() {
+    var w = state.orgsw;
+    if (!w || !state.user) { $orgsw.innerHTML = ""; return; }
+    var cur = state.org ? state.org.key : "";
+    var envs = (w.envs || []).filter(function (e) { return e.key !== "production"; });
+    var chips = envs.length ? envs.map(function (e) {
+      var why = e.key === cur ? "IN USE NOW" : !e.configured ? "NO LOGIN SET UP" : "";
+      return '<button class="chip" data-act="orgsw-pick" data-v="' + esc(e.key) + '" aria-pressed="' + (w.pick === e.key) + '"' + (e.selectable && e.key !== cur && !w.busy ? "" : " disabled") + ">" +
+        "<span>" + esc(e.label) + (why ? "<small>" + why + "</small>" : "") + "</span></button>";
+    }).join("") : '<div class="hint">Loading…</div>';
+    var dots = ""; for (var i = 0; i < Math.max(4, w.pin.length); i++) dots += '<i class="' + (i < w.pin.length ? "on" : "") + '"></i>';
+    var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "<"].map(function (k) {
+      return '<button data-act="orgsw-key" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '"' + (w.busy ? " disabled" : "") + ' aria-label="' + (k === "<" ? "Delete last digit" : k === "C" ? "Clear" : k) + '">' + (k === "<" ? "⌫" : k === "C" ? "CLEAR" : k) + "</button>";
+    }).join("");
+    var pickLabel = w.pick ? (envs.filter(function (e) { return e.key === w.pick; })[0] || {}).label || w.pick : "";
+    var ready = !!w.pick && w.pin.length >= 4 && !w.busy;
+    $orgsw.innerHTML = '<div class="scrim"><div class="sheet orgsw-sheet" role="dialog" aria-modal="true" aria-label="Switch Salesforce">' +
+      '<div class="sheet-head"><div class="sheet-title"><h2 class="warn">SWITCH SALESFORCE</h2>' +
+      "<p>This preview is on <b>" + esc(state.org.label) + "</b>. The live Catch on the floor stays on Production.</p></div>" +
+      '<button class="x" data-act="orgsw-close" aria-label="Close"' + (w.busy ? " disabled" : "") + ">" + ICON.x + "</button></div>" +
+      '<div><div class="sec-label">1 · WHICH ORG</div><div class="chips">' + chips + "</div></div>" +
+      '<p class="orgsw-note">Every tablet using this preview moves with it. Open forms close and nothing unsaved is kept.</p>' +
+      '<div><div class="sec-label">2 · SWITCH PIN</div><div class="dots">' + dots + '</div><div class="pin-pad">' + keys + "</div></div>" +
+      '<p class="help-err" role="alert">' + esc(w.err) + "</p>" +
+      '<button class="save warn' + (w.busy ? " busy" : "") + '" data-act="orgsw-go"' + (ready ? "" : " disabled") + ">" +
+      (w.busy ? '<span class="spin"></span>CHECKING ' + esc(String(pickLabel).toUpperCase()) + "…" : w.pick ? "SWITCH TO " + esc(String(pickLabel).toUpperCase()) : "PICK AN ORG") + "</button></div></div>";
+  }
+  function orgSwGo() {
+    var w = state.orgsw; if (!w || !w.pick || w.pin.length < 4 || w.busy) return;
+    w.busy = true; w.err = ""; renderOrgSw();
+    api("POST", "/api/sf-env", { env: w.pick, pin: w.pin }).then(function (r) {
+      if (state.orgsw !== w) return;
+      w.busy = false;
+      if (r.ok && r.data && r.data.ok) {
+        state.orgsw = null; renderOrgSw();
+        orgChanged(r.data.active, r.data.label, false);
+        showToast({ kind: "ok", title: "SWITCHED TO " + String(r.data.label).toUpperCase(), body: "This preview now reads and saves in " + r.data.label + ". Every preview tablet follows within a few seconds." });
+      } else {
+        w.pin = ""; w.err = (r.data && r.data.message) || "That didn't switch. Try again.";
+        renderOrgSw();
+      }
+    });
+  }
+
   /* -------------------------------------------------------------- help --- */
   /* HELP (11-02): the "?" in the header opens one pop-up, "Found a bug? Report it here:".
      The report goes to /api/bug-report, which emails Anthony and keeps a backup copy.
@@ -1398,7 +1500,7 @@
   var helpDraft = "";
   function helpWhere() {
     var o = current(), names = { box: "Log Boxes", mis: "Report Misprint", fin: "Finish Catching", dup: "Duplicate Box", del: "Delete Box", mock: "Mockup" };
-    return (state.mode === "past" ? "Past Orders" : "In Production") + (o ? " · " + o.num : "") + (state.sheet ? " · " + (names[state.sheet] || state.sheet) + " open" : "");
+    return (isTestOrg() ? "[" + state.org.label + " preview] " : "") + (state.mode === "past" ? "Past Orders" : "In Production") + (o ? " · " + o.num : "") + (state.sheet ? " · " + (names[state.sheet] || state.sheet) + " open" : "");
   }
   function openHelp() {
     if (!state.user) return;
@@ -1568,6 +1670,10 @@
         state.sheet = null; state.dup = null; state.del = null; state.delMany = null; if (kind === "delmany") state.picking = null; renderOverlay();
         showToast({ kind: "unsure", title: kind === "del" ? "NOT SURE IT DELETED" : kind === "delmany" ? "NOT SURE THEY DELETED" : "NOT SURE IT SAVED", body: (r.data && r.data.message) || "Check the order before trying again." });
         reloadAll();
+      } else if (r.data && r.data.error === "org_changed") {
+        // The preview site switched org while this form was open: nothing was saved; start over on the new org.
+        orgChanged(r.data.org, r.data.orgLabel, false);
+        showToast({ kind: "err", title: "NOT SAVED · SWITCHED TO " + String(r.data.orgLabel || r.data.org).toUpperCase(), body: r.data.message || "Nothing was saved." });
       } else if (r.status === 401) {
         // signedOut() already ran
       } else {
@@ -1913,6 +2019,15 @@
   };
 
   handlers["help-close"] = closeHelp;
+  handlers["orgsw-close"] = closeOrgSw;
+  handlers["orgsw-pick"] = function (el) { if (state.orgsw && !state.orgsw.busy) { state.orgsw.pick = el.getAttribute("data-v"); state.orgsw.err = ""; renderOrgSw(); } };
+  handlers["orgsw-key"] = function (el) {
+    var w = state.orgsw; if (!w || w.busy) return;
+    var k = el.getAttribute("data-k");
+    if (k === "C") w.pin = ""; else if (k === "<") w.pin = w.pin.slice(0, -1); else if (w.pin.length < 8) w.pin += k;
+    w.err = ""; renderOrgSw();
+  };
+  handlers["orgsw-go"] = orgSwGo;
   handlers["help-again"] = function () { if (state.help) { state.help = { text: "", sending: false, sent: false, emailed: false, err: "" }; renderHelp(); } };
   document.addEventListener("click", function (e) {
     // Help pop-up: a tap on the dimmed area outside it closes it (what was typed is kept).
@@ -1950,11 +2065,13 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && state.help) { closeHelp(); return; }
+    if (e.key === "Escape" && state.orgsw) { closeOrgSw(); return; }
     if (e.key === "Escape" && state.sheet && !state.saving) { state.sheet = null; state.delMany = null; state.sz = null; renderOverlay(); return; }
     if (e.key === "Escape" && state.picking && !state.saving) { state.picking = null; renderMain(); return; }
     if ((e.key === " " || e.key === "Enter") && e.target && e.target.getAttribute && e.target.getAttribute("data-act") === "pick-box") { e.preventDefault(); handlers["pick-box"](e.target); }
   });
   document.getElementById("help-btn").addEventListener("click", function () { if (state.help) closeHelp(); else openHelp(); });
+  document.getElementById("org-chip").addEventListener("click", function () { if (state.orgsw) closeOrgSw(); else openOrgSw(); });
   document.getElementById("zoom-in").addEventListener("click", function () { stepZoom(1); });
   document.getElementById("zoom-out").addEventListener("click", function () { stepZoom(-1); });
   document.getElementById("zoom-reset").addEventListener("click", function () { state.zoom = 1; saveZoom(1); applyZoom(); });
@@ -1993,5 +2110,6 @@
   // A refresh (any page load) signs out: end any earlier sign-in on the server, then show the PIN pad.
   api("POST", "/api/logout").then(function () {
     renderAll(); paintConn();
+    loadOrg();   // which Salesforce this site is on (preview: shown on the PIN screen and in the header)
   });
 })();

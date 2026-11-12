@@ -16,7 +16,7 @@
  *
  * Signed-in catchers only, like every other Catch endpoint, so every report carries a name.
  */
-import { sfFetch, apiVersion } from "./_sf.js";
+import { sfFetch, apiVersion, orgFor, orgOf, orgLabel, credsFor } from "./_sf.js";
 import { requireUser } from "./_session.js";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -34,7 +34,8 @@ export function chicagoTime(d) {
 
 export function buildEmail(r) {
   const first = r.text.split(/\s+/).slice(0, 8).join(" ");
-  const subject = `Catch bug report from ${r.name}: ${first}${r.text.length > first.length ? "…" : ""}`.slice(0, 200);
+  const where = r.sfOrg && r.sfOrg !== "production" ? ` (${r.sfOrgLabel || r.sfOrg} preview)` : "";
+  const subject = `Catch bug report${where} from ${r.name}: ${first}${r.text.length > first.length ? "…" : ""}`.slice(0, 200);
   const body = `${r.text}\n\n${r.name} · ${r.when}`;
   return { subject, body };
 }
@@ -59,7 +60,11 @@ export async function sendViaSalesforce(env, to, subject, body) {
   return { ok: false, error: last.slice(0, 500) };
 }
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env: siteEnv }) {
+  // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
+  const org = await orgFor(request, siteEnv);
+  if (org.response) return org.response;
+  const env = org.env;
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
   let b;
@@ -69,9 +74,10 @@ export async function onRequestPost({ request, env }) {
 
   const name = clip(auth.user.name, 60) || "someone (not signed in)";
   const now = new Date();
-  let org = "";
-  try { org = new URL(env.SF_LOGIN_URL || "").host; } catch (e) { org = ""; }
-  const report = { text, name, at: now.toISOString(), when: chicagoTime(now), org,
+  let orgHost = "";
+  try { orgHost = new URL(credsFor(env, orgOf(env)).loginUrl || "").host; } catch (e) { orgHost = ""; }
+  // sfOrg (11-12): a report sent from the preview site says which test org it was on.
+  const report = { text, name, at: now.toISOString(), when: chicagoTime(now), org: orgHost, sfOrg: orgOf(env), sfOrgLabel: orgLabel(orgOf(env)),
     from: clip(b.from, 200), screen: clip(b.screen, 40), agent: clip(b.agent, 300) };
 
   const { subject, body } = buildEmail(report);

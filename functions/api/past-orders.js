@@ -8,14 +8,18 @@
  * server's clock. Read-only.
  */
 import { stripItems } from "./_orders.js";
-import { json, errorResponse, runQuery, soqlQuote } from "./_sf.js";
+import { json, errorResponse, runQuery, soqlQuote, orgFor, orgOf, orgLabel } from "./_sf.js";
 import { requireUser } from "./_session.js";
 import { loadReviewOrders, printerNames } from "./_orders.js";
 
 export const PAST_DAYS = 30;
 const MAX_ORDERS = 60;
 
-export async function onRequestGet({ request, env }) {
+export async function onRequestGet({ request, env: siteEnv }) {
+  // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
+  const org = await orgFor(request, siteEnv);
+  if (org.response) return org.response;
+  const env = org.env;
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
   try {
@@ -33,7 +37,7 @@ export async function onRequestGet({ request, env }) {
       stripItems(rest);
       return Object.assign(rest, { lastBoxAt: latest.get(o.id) || null, hasMockup: false });
     });
-    return json({ orders: out, days: PAST_DAYS, at: new Date().toISOString() });
+    return json({ orders: out, days: PAST_DAYS, at: new Date().toISOString(), org: orgOf(env), orgLabel: orgLabel(orgOf(env)) });
   } catch (err) {
     return errorResponse(err);
   }

@@ -15,14 +15,18 @@
  *   - The order's products (quantities, prices) are never changed.
  * Answers 200 { ok, order } with the order as the board shows it now.
  */
-import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID, SfError } from "./_sf.js";
+import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID, SfError, orgFor } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder, stripItems } from "./_orders.js";
 import { SIZE_CHANGES_FIELD, ANSWER_FIELD, ANSWERS, MAX_TEXT, lineLabels, formatLine, replaceLine, shopDate, oneLine } from "./_sizechanges.js";
 
 const HTTP_DATE = (iso) => new Date(iso).toUTCString();
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env: siteEnv }) {
+  // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
+  const org = await orgFor(request, siteEnv);
+  if (org.response) return org.response;
+  const env = org.env;
   const auth = await requireUser(request, env);
   if (auth.response) return auth.response;
   try {
