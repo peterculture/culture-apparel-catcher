@@ -444,8 +444,8 @@ counting screen creates (`functions/api/_forge.js`). Decided 11-12: **the Catch 
 over **as each box is saved**, and a misprint shows on the run results **the moment it's logged**.
 
 - **Which run:** each size the catcher counts is an Order Product. Its count goes on that Order Product's size
-  line (`Production_Run_Line_Item__c.Order_Product__c`) on the **most recent run of the order that isn't
-  Submitted** (latest Actual Start, else Scheduled Start): the run whose garments are coming off the dryer.
+  line (`Production_Run_Line_Item__c.Order_Product__c`) on the run **on press now**: not Submitted, and of
+  those the one that started last (Actual Start). Only if none has started: the one scheduled soonest.
 - **Box saved** (Log Box, Save & New, Boxes like this, Duplicate): one Run Result per size, **Good** = the count,
   Counted By = the catcher, note "The Catch · box Tees 3". **Box edited:** its Run Results are deleted and made
   again. **Box deleted** (one or several): its Run Results are deleted. Which belong to which box: KV

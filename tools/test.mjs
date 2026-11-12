@@ -1435,6 +1435,26 @@ await test("Forge run results: a misprint shows at once as Misprint (or Damaged)
   ok(r.status === 200 && db.results[1].Damaged_Qty__c === 1 && !db.results[1].Misprint_Qty__c, "Hole / damaged -> Damaged");
 });
 
+await test("Forge run results: the run on press now wins over one scheduled for later (staging 18319, 11-12)", async () => {
+  reset(); const env = PREVIEW(); const c = await signIn(env);
+  // Real staging shape: Left Chest submitted, Back started (on press), Left Sleeve submitted, Right Sleeve not started, scheduled tomorrow.
+  db.results = []; db.runLines = [];
+  const runs = [["101", "PR-0210", "Submitted", "2026-11-12T17:15:00.000+0000", "2026-11-12T20:00:00.000+0000"],
+    ["102", "PR-0211", "Draft", "2026-11-12T19:45:00.000+0000", "2026-11-12T21:00:00.000+0000"],
+    ["103", "PR-0212", "Submitted", "2026-11-12T20:45:00.000+0000", "2026-11-13T13:00:00.000+0000"],
+    ["104", "PR-0213", "Draft", null, "2026-11-13T14:00:00.000+0000"]];
+  for (const [n, name, st, act, sch] of runs) db.runLines.push({ Id: "a1P" + n + "000000000" + n.slice(1), Order_Product__c: IT.M, ProductionRun__c: "a1Q000000000000" + n,
+    ProductionRun__r: { Name: name, Result_Status__c: st, Actual_Start__c: act, Scheduled_Start__c: sch } });
+  let r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000001AAA", line: 0, qty: 2, size: "M", garment: "Navy Gildan 5000 Tee", reason: "Stained", requestId: "req-fg000020" }, c), env });
+  let d = await r.json();
+  ok(r.status === 200 && /PR-0211/.test(d.forgeNote) && db.results[0] && db.results[0].Line_Item__c === db.runLines[1].Id, "on press (started) PR-0211, not tomorrow's PR-0213");
+  // Nothing started yet: the soonest scheduled.
+  db.results = []; db.runLines[1].ProductionRun__r.Actual_Start__c = null; db.runLines[1].ProductionRun__r.Scheduled_Start__c = "2026-11-14T13:00:00.000+0000";
+  r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000001AAA", line: 0, qty: 1, size: "M", garment: "Navy Gildan 5000 Tee", reason: "Stained", requestId: "req-fg000021" }, c), env });
+  d = await r.json();
+  ok(/PR-0213/.test(d.forgeNote), "none started -> the one scheduled soonest");
+});
+
 await test("Forge run results: never blocks the Catch, and stays off on Production", async () => {
   reset(); forgeDb(); let env = PREVIEW(); let c = await signIn(env);
   // Every run submitted -> nothing on the Forge, box still saved.

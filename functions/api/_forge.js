@@ -17,9 +17,10 @@
  * the same Run_Result__c rows The Forge's own "add a count" creates (run-results/index.js addCounts).
  *
  * WHICH RUN. Each size the catcher counts is an Order Product the Catch already knows. Its count
- * goes on the size line of the MOST RECENT run of that order that prints that Order Product and is
- * not Submitted (latest Actual Start, else Scheduled Start). That is the run whose garments are
- * coming off the dryer. A Submitted run is final on The Forge (the org refuses changes), so it is
+ * goes on the size line of the run of that order that is ON PRESS NOW: not Submitted, and of those
+ * the one that STARTED last (latest Actual Start). Only if none has started yet: the one scheduled
+ * soonest. (11-12, staging 18319: ranking unstarted runs by Scheduled Start put a count on PR-0213,
+ * the Right Sleeve scheduled for the next day, instead of PR-0211, the Back on press.) A Submitted run is final on The Forge (the org refuses changes), so it is
  * skipped; if every run is Submitted or there is no run yet, nothing goes over and the tablet says so.
  *
  *   box saved          Good = the box's count per size (one Run Result per size, per box)
@@ -64,7 +65,14 @@ export async function forgeLayer(env) {
   return ok;
 }
 
-const when = (l) => String((l.ProductionRun__r && (l.ProductionRun__r.Actual_Start__c || l.ProductionRun__r.Scheduled_Start__c)) || "");
+/* On press now first: started runs, latest start first; then unstarted runs, soonest scheduled first. */
+function pressOrder(a, b) {
+  const ra = a.ProductionRun__r || {}, rb = b.ProductionRun__r || {};
+  const sa = ra.Actual_Start__c ? 1 : 0, sb = rb.Actual_Start__c ? 1 : 0;
+  if (sa !== sb) return sb - sa;
+  if (sa) return String(rb.Actual_Start__c).localeCompare(String(ra.Actual_Start__c));
+  return String(ra.Scheduled_Start__c || "9999").localeCompare(String(rb.Scheduled_Start__c || "9999"));
+}
 
 /** OrderItem id -> { lineId, runId, runName } on the most recent run that isn't Submitted. */
 export async function openRunLines(env, itemIds) {
@@ -77,7 +85,7 @@ export async function openRunLines(env, itemIds) {
     `WHERE Order_Product__c IN (${ids.map(soqlQuote).join(",")})`);
   const key = (id) => String(id || "");   // both sides are 18-character ids straight from Salesforce
   const open = rows.filter((l) => !(l.ProductionRun__r && l.ProductionRun__r.Result_Status__c === SUBMITTED))
-    .sort((a, b) => when(b).localeCompare(when(a)));
+    .sort(pressOrder);
   for (const l of open) {
     const k = key(l.Order_Product__c);
     if (!out.has(k)) out.set(k, { lineId: l.Id, runId: l.ProductionRun__c, runName: (l.ProductionRun__r && l.ProductionRun__r.Name) || "" });
