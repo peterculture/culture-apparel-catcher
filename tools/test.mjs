@@ -32,6 +32,7 @@ const bdelm = await mod("box-delete-many");
 const szc = await mod("size-change");
 const szlib = await mod("_sizechanges");
 const sfenv = await mod("sf-env");
+const forge = await mod("_forge");
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  FAIL:", msg); } }
@@ -40,7 +41,7 @@ async function test(name, fn) { console.log("•", name); try { await fn(); } ca
 /* ---------------- pretend Salesforce ---------------- */
 let db, calls, behave;
 function reset() {
-  sf._resetTokenCache(); sf._resetDescribeCache();
+  sf._resetTokenCache(); sf._resetDescribeCache(); forge._resetForge();
   calls = [];
   behave = {};
   db = {
@@ -128,6 +129,10 @@ globalThis.fetch = async (url, init = {}) => {
         { LinkedEntityId: "801000000000001AAA", ContentDocumentId: "069000000000001AAA", ContentDocument: { Title: "Green proof", LatestPublishedVersionId: "068000000000001AAA" } },
       ] });
     }
+    if (/FROM Production_Run_Line_Item__c/.test(q)) {
+      if (!db.runLines) return res(400, [{ errorCode: "INVALID_TYPE", message: "sObject type 'Production_Run_Line_Item__c' is not supported." }]);
+      return res(200, { done: true, records: db.runLines.filter((l) => q.includes(l.Order_Product__c)) });
+    }
     if (/FROM Design__c/.test(q)) return res(200, { done: true, records: db.designs.filter((d) => q.includes(d.Opportunity__c)) });
     return res(200, { done: true, records: [] });
   }
@@ -144,9 +149,22 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname.endsWith("/sobjects/Order_Packaging__c") && method === "POST") {
     if (behave.boxTimeout) throw new Error("timeout");
     if (behave.boxReject) return res(400, [{ errorCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "Box needs a type" }]);
-    const b = JSON.parse(init.body); const id = "a0X" + (db.boxes.length + 1);
+    const b = JSON.parse(init.body); const id = "a0X" + String(db.boxes.length + 1).padStart(15, "0");
     db.boxes.push(Object.assign({ Id: id, CreatedDate: new Date().toISOString(), CreatedBy: { Name: "Catcher App" } }, b));
     return res(201, { id, success: true, errors: [] });
+  }
+  /* The Forge's Run Results (11-12): describe, create, delete. */
+  if (u.pathname.endsWith("/sobjects/Run_Result__c/describe")) return db.runLines ? res(200, { name: "Run_Result__c", fields: [] }) : res(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }]);
+  if (u.pathname.endsWith("/composite/sobjects") && method === "POST" && /"Run_Result__c"/.test(init.body || "")) {
+    const b = JSON.parse(init.body);
+    if (behave.rrReject) return res(400, b.records.map(() => ({ success: false, errors: [{ statusCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "This run is submitted" }] })));
+    return res(200, b.records.map((r) => { const id = "a1R" + String((db.results.length + 1)).padStart(15, "0"); const { attributes, ...f } = r; db.results.push(Object.assign({ Id: id }, f)); return { id, success: true, errors: [] }; }));
+  }
+  if (u.pathname.endsWith("/composite/sobjects") && method === "DELETE" && (u.searchParams.get("ids") || "").startsWith("a1R")) {
+    const ids = u.searchParams.get("ids").split(",");
+    if (behave.rrLock) return res(200, ids.map((id) => ({ id, success: false, errors: [{ statusCode: "FIELD_CUSTOM_VALIDATION_EXCEPTION", message: "Run Results on a submitted run can't change" }] })));
+    db.results = db.results.filter((r) => !ids.includes(r.Id));
+    return res(200, ids.map((id) => ({ id, success: true, errors: [] })));
   }
   if (u.pathname.endsWith("/composite/sobjects") && method === "DELETE") {
     const ids = (u.searchParams.get("ids") || "").split(",").filter(Boolean);
@@ -1352,6 +1370,101 @@ await test("Org switcher: the tablet shows the org and sends it with every save"
   ok(/"X-Catch-Org": state\.org\.key/.test(js), "saves carry X-Catch-Org");
   ok(/r\.data\.org !== state\.org\.key\) \{ orgChanged/.test(js), "a list from another org starts the tablet over");
   ok(/e\.key !== "production"/.test(js), "the switcher never offers Production");
+});
+
+/* ---------------- Catch counts on The Forge's Run Results (11-12) ---------------- */
+const IT = { L: "802000000000000001", S: "802000000000000002", M: "802000000000000003" };
+function forgeDb() {
+  // Two runs on order 1: PR-0101 (front, done earlier, submitted) and PR-0102 (back, on press now).
+  db.results = [];
+  db.runLines = [];
+  for (const [size, id] of Object.entries(IT)) {
+    db.runLines.push({ Id: "a1P1" + id.slice(4), Order_Product__c: id, ProductionRun__c: "a1Q000000000000101",
+      ProductionRun__r: { Name: "PR-0101", Result_Status__c: "Submitted", Actual_Start__c: "2026-11-12T14:00:00.000+0000" } });
+    db.runLines.push({ Id: "a1P2" + id.slice(4), Order_Product__c: id, ProductionRun__c: "a1Q000000000000102",
+      ProductionRun__r: { Name: "PR-0102", Result_Status__c: "Draft", Actual_Start__c: "2026-11-12T16:00:00.000+0000" } });
+  }
+}
+const lineOf = (size) => "a1P2" + IT[size].slice(4);
+
+await test("Forge run results: a box saved on the staging preview adds Good per size to the order's open run", async () => {
+  reset(); forgeDb(); const env = PREVIEW(); const c = await signIn(env);
+  const r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box",
+    counts: [{ line: 0, size: "S", qty: 8 }, { line: 0, size: "M", qty: 15 }], requestId: "req-fg000001" }, c), env });
+  const d = await r.json();
+  ok(r.status === 201, "box saved");
+  ok(db.results.length === 2, "one Run Result per size");
+  const s = db.results.find((x) => x.Line_Item__c === lineOf("S")), m = db.results.find((x) => x.Line_Item__c === lineOf("M"));
+  ok(s && s.Good_Qty__c === 8 && m && m.Good_Qty__c === 15, "Good = the box's count, on PR-0102's size lines (not the submitted PR-0101)");
+  ok(s.Counted_By__c === "Maria R." && /The Catch · box /.test(s.Note__c) && s.Counted_At__c, "who, when and which box");
+  ok(/Added 23 good to the Forge's run results \(PR-0102\)/.test(d.forgeNote), "the tablet is told where it went");
+  const kv = [...env.CATCHER_KV._m.keys()].find((k) => k.startsWith("forge:box:staging:"));
+  ok(kv && JSON.parse(env.CATCHER_KV._m.get(kv)).length === 2, "box -> its Run Results remembered per org");
+});
+
+await test("Forge run results: edit re-makes them, delete removes them, several boxes at once too", async () => {
+  reset(); forgeDb(); const env = PREVIEW(); const c = await signIn(env);
+  let r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box",
+    counts: [{ line: 0, size: "L", qty: 10 }], requestId: "req-fg000002" }, c), env });
+  const box = (await r.json()).box;
+  r = await bedit.onRequestPost({ request: req("POST", "/api/box-edit", { orderId: "801000000000001AAA", boxId: box.id, type: "Standard Culture Box", word: "Tees",
+    counts: [{ line: 0, size: "L", qty: 6 }, { line: 0, size: "M", qty: 2 }], requestId: "req-fg000003" }, c), env });
+  let d = await r.json();
+  ok(r.status === 200 && db.results.length === 2 && db.results.some((x) => x.Line_Item__c === lineOf("L") && x.Good_Qty__c === 6) && !db.results.some((x) => x.Good_Qty__c === 10), "edit: old Run Result gone, new counts in");
+  ok(/^Updated on the Forge: 8 good/.test(d.forgeNote), "edit note");
+  r = await bdel.onRequestPost({ request: req("POST", "/api/box-delete", { orderId: "801000000000001AAA", boxId: box.id, requestId: "req-fg000004" }, c), env });
+  d = await r.json();
+  ok(r.status === 200 && db.results.length === 0 && /Taken off the Forge/.test(d.forgeNote), "delete: its Run Results go too");
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box",
+    counts: [{ line: 0, size: "S", qty: 4 }], copies: 3, requestId: "req-fg000005" }, c), env });
+  d = await r.json();
+  ok(r.status === 201 && db.results.length === 3 && db.results.every((x) => x.Good_Qty__c === 4), "Boxes like this ×3 -> three Run Results");
+  r = await bdelm.onRequestPost({ request: req("POST", "/api/box-delete-many", { orderId: "801000000000001AAA", boxIds: d.boxes.map((b) => b.id), requestId: "req-fg000006" }, c), env });
+  ok(r.status === 200 && db.results.length === 0, "delete several: all their Run Results go");
+});
+
+await test("Forge run results: a misprint shows at once as Misprint (or Damaged) with the reason", async () => {
+  reset(); forgeDb(); const env = PREVIEW(); const c = await signIn(env);
+  let r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000001AAA", line: 0, qty: 2, size: "M", garment: "Navy Gildan 5000 Tee", reason: "Stained", note: "left sleeve", requestId: "req-fg000007" }, c), env });
+  let d = await r.json();
+  const m = db.results[0];
+  ok(r.status === 200 && m && m.Line_Item__c === lineOf("M") && m.Misprint_Qty__c === 2 && !m.Damaged_Qty__c, "Misprint 2 on PR-0102's M line");
+  ok(m.Note__c === "The Catch: Stained: left sleeve", "reason + note (The Forge requires words on a loss)");
+  ok(/PR-0102, M misprinted 2/.test(d.forgeNote), "tablet told");
+  r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000001AAA", line: 0, qty: 1, size: "L", garment: "Navy Gildan 5000 Tee", reason: "Hole / damaged", requestId: "req-fg000008" }, c), env });
+  ok(r.status === 200 && db.results[1].Damaged_Qty__c === 1 && !db.results[1].Misprint_Qty__c, "Hole / damaged -> Damaged");
+});
+
+await test("Forge run results: never blocks the Catch, and stays off on Production", async () => {
+  reset(); forgeDb(); let env = PREVIEW(); let c = await signIn(env);
+  // Every run submitted -> nothing on the Forge, box still saved.
+  db.runLines.forEach((l) => { l.ProductionRun__r.Result_Status__c = "Submitted"; });
+  let r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", counts: [{ line: 0, size: "S", qty: 3 }], requestId: "req-fg000009" }, c), env });
+  let d = await r.json();
+  ok(r.status === 201 && db.results.length === 0 && /already submitted/.test(d.forgeNote), "all runs final -> box saved, told why it isn't on the Forge");
+  db.runLines = [];
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", counts: [{ line: 0, size: "S", qty: 3 }], requestId: "req-fg000010" }, c), env });
+  d = await r.json();
+  ok(r.status === 201 && /no production run there yet/.test(d.forgeNote), "no run yet -> told");
+  forgeDb(); behave.rrReject = true;
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", counts: [{ line: 0, size: "S", qty: 3 }], requestId: "req-fg000011" }, c), env });
+  d = await r.json();
+  ok(r.status === 201 && /^Saved on the Catch, but not added/.test(d.forgeNote), "Salesforce refuses the Run Result -> box still saved (201), tablet warned");
+  behave.rrReject = false;
+  // Extra size: no run line, nothing sent.
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", counts: [{ line: 0, size: "2XL", qty: 2, extra: true }], requestId: "req-fg000012" }, c), env });
+  ok(r.status === 201 && db.results.length === 0, "extras stay on the Catch");
+  // The live site (Production): never, even if the objects existed.
+  reset(); forgeDb(); env = ENV(); c = await signIn(env);
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", counts: [{ line: 0, size: "S", qty: 3 }], requestId: "req-fg000013" }, c), env });
+  d = await r.json();
+  ok(r.status === 201 && db.results.length === 0 && !d.forgeNote && !calls.some((x) => /Run_Result__c|Production_Run_Line_Item__c/.test(decodeURIComponent(x.url))), "live site: Forge never asked");
+  // A staging org without the Forge's objects: nothing asked after the first check, box fine.
+  reset(); env = PREVIEW(); c = await signIn(env);
+  r = await boxes.onRequestPost({ request: req("POST", "/api/boxes", { orderId: "801000000000001AAA", type: "Standard Culture Box", counts: [{ line: 0, size: "S", qty: 3 }], requestId: "req-fg000014" }, c), env });
+  ok(r.status === 201 && !(await r.json()).forgeNote, "org without Run Results -> quiet");
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  ok(/r\.data\.forgeNote && state\.toast/.test(js), "tablet appends the Forge line to the toast");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {

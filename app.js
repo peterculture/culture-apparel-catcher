@@ -1659,6 +1659,8 @@
             : mp.extra ? " " + mp.size + " is an extra size (not on the order), so it's in the notes only." : "";
           showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + "." + where + " The print shop has been notified." });
         }
+        // Where the count went on The Forge's run results (11-12, preview site); one line under the toast.
+        if (r.data && r.data.forgeNote && state.toast) { state.toast.body += " " + r.data.forgeNote; if (/^Saved on the Catch, but|still (show|count)/.test(r.data.forgeNote) && state.toast.kind === "ok") { state.toast.kind = "unsure"; clearTimeout(toastTimer); } }
         state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null; state.del = null; state.delMany = null;
         if (kind === "box" && opts.andNew && o) {
           // SAVE BOX & NEW: only now that Salesforce has confirmed, open a fresh, blank box.

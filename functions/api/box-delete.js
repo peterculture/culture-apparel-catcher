@@ -13,6 +13,7 @@ import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadReviewOrder, canChange } from "./_orders.js";
 import { expired } from "./box-edit.js";
+import { forgeAfterDelete } from "./_forge.js";
 
 export async function onRequestPost({ request, env: siteEnv }) {
   // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
@@ -53,7 +54,8 @@ export async function onRequestPost({ request, env: siteEnv }) {
           : `The box is deleted, but the order's Packaging Count still says ${order.finishedCount}. Tell a manager to set it to ${left}.`;
         if (!(r2 && r2.status === 204)) console.error("packaging count update after delete failed", r2 && r2.status);
       }
-      const result = { ok: true, orderId: order.id, deleted: { id: box.id, name: box.name, type: box.type, qty: box.qty, sizes: box.sizes }, boxCount: left, countNote };
+      const forgeNote = await forgeAfterDelete(env, [box.id]);
+      const result = { ok: true, orderId: order.id, deleted: { id: box.id, name: box.name, type: box.type, qty: box.qty, sizes: box.sizes }, boxCount: left, countNote, forgeNote };
       await rememberResult(env, requestId, result);
       return json(result, 200);
     });

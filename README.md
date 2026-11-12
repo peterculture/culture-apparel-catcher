@@ -435,3 +435,29 @@ Settings → Builds → Branch control must allow preview branches (the default:
 **Logins:** the preview uses The Forge's sandbox connected apps, so it signs in as The Forge's
 integration user (wider access than Production's `Catcher_App_Access`). A permission problem that only
 Production's tighter login would hit won't show up on the preview.
+
+## The Catch's counts on The Forge's Run Results (11-12)
+
+For testing with The Forge on the preview site (staging / dev2). The Forge itself is not changed: it already
+reads its counts from Salesforce, so the Catch creates the same `Run_Result__c` records The Forge's own
+counting screen creates (`functions/api/_forge.js`). Decided 11-12: **the Catch owns the count**, counts go
+over **as each box is saved**, and a misprint shows on the run results **the moment it's logged**.
+
+- **Which run:** each size the catcher counts is an Order Product. Its count goes on that Order Product's size
+  line (`Production_Run_Line_Item__c.Order_Product__c`) on the **most recent run of the order that isn't
+  Submitted** (latest Actual Start, else Scheduled Start): the run whose garments are coming off the dryer.
+- **Box saved** (Log Box, Save & New, Boxes like this, Duplicate): one Run Result per size, **Good** = the count,
+  Counted By = the catcher, note "The Catch · box Tees 3". **Box edited:** its Run Results are deleted and made
+  again. **Box deleted** (one or several): its Run Results are deleted. Which belong to which box: KV
+  `forge:box:<org>:<boxId>`.
+- **Misprint saved:** one Run Result, **Misprint** (or **Damaged** for "Hole / damaged"), note
+  "The Catch: Stained: left sleeve". Salesforce's RunResultRollup adds it into the run line's totals, which
+  The Forge's counting screen, Production Check pre-fill, reprint check and shortfall list read.
+- **Never blocks the Catch:** the box or misprint is already saved when this runs. If every run is Submitted,
+  the order has no run yet, or Salesforce refuses, the toast says so ("Not on the Forge: …") and nothing else
+  changes. Extras (Add More) have no run line and stay on the Catch.
+- **Where:** only in an org that has `Run_Result__c`, and never on Production (the live site) unless
+  `FORGE_RESULTS=on` is set there. Production has none of The Forge's objects today.
+- **Not done by the Catch:** The Forge's own add also rebuilds `Order.Run_Result_Notes__c`; the Catch writes
+  `Misprint_Details__c` as before instead. Earlier passes (e.g. the front run before the back) get no Catch
+  counts, so The Forge's "every size must balance" rule still applies to them when a run is submitted there.

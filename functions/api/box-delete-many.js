@@ -15,6 +15,7 @@ import { json, errorResponse, sfFetch, apiVersion, sfMessage, sfErrorCode, SF_ID
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadReviewOrder, canChange } from "./_orders.js";
 import { expired } from "./box-edit.js";
+import { forgeAfterDelete } from "./_forge.js";
 
 export const MAX_DELETE = 100;
 
@@ -73,7 +74,7 @@ export async function onRequestPost({ request, env: siteEnv }) {
         if (!(r2 && r2.status === 204)) console.error("packaging count update after delete-many failed", r2 && r2.status);
       }
       const result = { ok: true, orderId: order.id, deleted: boxes.map((b) => ({ id: b.id, name: b.name, type: b.type, qty: b.qty, sizes: b.sizes })),
-        boxCount: left, countNote };
+        boxCount: left, countNote, forgeNote: await forgeAfterDelete(env, boxes.map((b) => b.id)) };
       await rememberResult(env, requestId, result);
       return json(result, 200);
     });
