@@ -22,7 +22,6 @@ import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, SF
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
 import { boxFields, garmentWord, nextNames } from "./_boxes.js";
-import { forgeAfterBoxes } from "./_forge.js";
 
 export const MAX_DUPLICATES = 100;
 
@@ -89,7 +88,6 @@ export async function onRequestPost({ request, env: siteEnv }) {
       }
 
       const result = { ok: true, created: count, failed: 0, sourceId: src.id, boxes: created.map((c) => box(c, src, auth)) };
-      result.forgeNote = await forgeAfterBoxes(env, order, result.boxes, auth.user.name);
       await rememberResult(env, requestId, result);
       return json(result, 201);
     });

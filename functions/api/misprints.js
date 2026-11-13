@@ -32,7 +32,6 @@
 import { json, errorResponse, sfFetch, apiVersion, sfMessage, SF_ID, SfError, orgFor } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
-import { forgeAfterMisprint } from "./_forge.js";
 
 export const REASONS = ["Stained", "Off-center", "Crooked", "Ink smear", "Wrong color", "Burned", "Hole / damaged", "Other"];
 export const DAMAGED_REASON = "Hole / damaged";
@@ -169,8 +168,6 @@ export async function onRequestPost({ request, env: siteEnv }) {
           orderId: order.id,
           misprintTotal: newTotal,
         };
-        // "The second a misprint is logged ... it should show on the run results" (11-12).
-        result.forgeNote = await forgeAfterMisprint(env, item ? item.id : null, { qty, damaged, reason, note, who, size });
         await rememberResult(env, requestId, result);
         return json(result, 200);
       }

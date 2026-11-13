@@ -17,7 +17,6 @@ import { json, errorResponse, sfFetch, apiVersion, picklistValues, sfMessage, sf
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadReviewOrder, canChange } from "./_orders.js";
 import { boxFields, countsShapeError, checkCounts, garmentWord } from "./_boxes.js";
-import { forgeAfterEdit } from "./_forge.js";
 
 export async function onRequestPost({ request, env: siteEnv }) {
   // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
@@ -75,7 +74,6 @@ export async function onRequestPost({ request, env: siteEnv }) {
       const result = { ok: true, orderId: order.id,
         box: Object.assign({}, box, { name, type, qty: checked.qty, sizes: checked.breakdown, counts: checked.clean, lastModified: new Date().toISOString() }),
         before: { name: box.name, type: box.type, qty: box.qty, sizes: box.sizes } };
-      result.forgeNote = await forgeAfterEdit(env, order, result.box, box.countedBy || auth.user.name);
       await rememberResult(env, requestId, result);
       return json(result, 200);
     });

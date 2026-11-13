@@ -24,7 +24,6 @@ import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.j
 import { loadOneOrder } from "./_orders.js";
 import { boxFields, countsShapeError, checkCounts, garmentWord, nextNames } from "./_boxes.js";
 import { MAX_DUPLICATES } from "./duplicate-box.js";
-import { forgeAfterBoxes } from "./_forge.js";
 
 export async function onRequestPost({ request, env: siteEnv }) {
   // Which Salesforce org this request uses, fixed for the whole request (11-12, see _sf.js).
@@ -97,8 +96,6 @@ export async function onRequestPost({ request, env: siteEnv }) {
       boxCount: order.boxes.length + 1,
       boxed: order.boxes.reduce((a, b) => a + b.qty, 0) + qty,
     };
-    // The Forge's run results (11-12): Good per size on the order's open run. Never undoes the box.
-    result.forgeNote = await forgeAfterBoxes(env, order, [result.box], auth.user.name);
     await rememberResult(env, requestId, result);
     return json(result, 201);
     });
@@ -136,7 +133,6 @@ async function saveMany({ env, auth, order, requestId, type, qty, breakdown, cle
   }
   const result = { ok: true, box: made[0], boxes: made, created: copies, orderId: order.id,
     boxCount: order.boxes.length + copies, boxed: order.boxes.reduce((a, b) => a + b.qty, 0) + qty * copies };
-  result.forgeNote = await forgeAfterBoxes(env, order, made, auth.user.name);
   await rememberResult(env, requestId, result);
   return json(result, 201);
 }
