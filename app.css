@@ -625,3 +625,6 @@ html[data-ca-season] .ca-season-head { margin-bottom: 1.25rem; }
 .save.sz-save { background: var(--warn); color: #1a1205; }
 .save.sz-save:disabled { background: var(--surface-card); color: var(--text-muted); }
 @media (max-width: 700px) { .sz-row { grid-template-columns: 3.4rem 4.2rem 5.6rem minmax(0, 1fr); gap: .6rem; } }
+
+/* Everything left (11-13): full-width button under Rest of / Next size in Log Box and Edit Box. */
+.quick .fill-all { flex-basis: 100%; border-color: var(--accent, var(--border-strong)); font-weight: 700; }

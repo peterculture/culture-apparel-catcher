@@ -1107,6 +1107,19 @@
   function sizeLeft(s) {
     return s.qty - (s.boxed || 0);
   }
+  /* EVERYTHING LEFT (11-13, Anthony: "fill this box with everything on the order"): one tap puts
+     every size's "left" into this box (in Edit Box: what's left plus what this box already holds).
+     Extras (Add More) aren't touched. Sizes with nothing left are set to 0. */
+  function everythingLeft(o, b) {
+    var orig = b.edit ? b.edit.orig : {}, cells = {}, total = 0;
+    o.lines.forEach(function (l, li) {
+      l.sizes.forEach(function (s) {
+        var k = cellKey(li, s.size), v = Math.max(0, sizeLeft(s) + (orig[k] || 0));
+        cells[k] = v; total += v;
+      });
+    });
+    return { cells: cells, total: total };
+  }
   /* BOXES LIKE THIS (11-02): how many identical boxes Log Box saves at once (1-100, default 1).
      Typed on the same keypad: tap the tile, then the digits. 0 = not a valid number yet. */
   var MAX_COPIES = 100;
@@ -1180,6 +1193,7 @@
     var selSize = selLine ? selLine.sizes.filter(function (s) { return s.size === selName; })[0] : null;
     var selExtra = !selSize && selLine && extrasFor(o, b, Number(selParts[0])).indexOf(selName) >= 0;
     var restN = selSize ? Math.max(0, sizeLeft(selSize) + (orig[b.sel] || 0)) : 0;
+    var allLeftN = everythingLeft(o, b).total;
     var selCopies = !ed && b.sel === "copies", n = ed ? 1 : copiesN(b);
     var ready = total > 0 && total <= 9999 && !!b.type && (!ed || !!b.word) && n > 0;
     var label = state.saving ? "SAVING TO SALESFORCE…" : !ready ? (!b.type ? "PICK A PACKAGING TYPE" : !total ? "COUNT AT LEAST ONE SIZE" : !n ? "BOXES LIKE THIS: 1 TO " + MAX_COPIES : "COUNT AT LEAST ONE SIZE")
@@ -1214,7 +1228,9 @@
       '<div class="pad-wrap"><div class="pad-for">' + (selCopies ? "HOW MANY <b>BOXES LIKE THIS</b> · 1 TO " + MAX_COPIES : selSize || selExtra ? "COUNT FOR <b>" + esc(selName) + "</b>" + (selExtra ? " · EXTRA" : "") + (o.lines.length > 1 ? " · " + esc(selLine.color || selLine.product) : "") : "TAP A SIZE") + "</div>" +
       '<div class="pad">' + keys + "</div>" +
       '<div class="quick"><button data-act="box-rest"' + (selSize && restN ? "" : " disabled") + ">Rest of " + (selSize ? esc(selSize.size) : "size") + " (" + restN + ")</button>" +
-      '<button data-act="box-next"' + (selSize || selExtra ? "" : " disabled") + ">Next size →</button></div></div></div>" +
+      '<button data-act="box-next"' + (selSize || selExtra ? "" : " disabled") + ">Next size →</button>" +
+      '<button class="fill-all" data-act="box-fill-all"' + (allLeftN ? "" : " disabled") + ' aria-label="Fill this box with everything left on the order: ' + allLeftN + ' garments">' +
+      (allLeftN ? "Everything left on the order (" + allLeftN + ")" : "Nothing left on the order") + "</button></div></div></div>" +
       '<div class="total-bar' + (total ? " on" : "") + '"><div><div class="l">' + (n > 1 ? "IN EACH BOX" : "TOTAL IN THIS BOX") + '</div><div class="v" aria-live="polite">' + total + "</div></div>" +
       copiesTile +
       '<div class="gt">Garment Type<b>' + esc(gtName) + "</b></div></div>" +
@@ -1848,6 +1864,14 @@
       var s = line && line.sizes.filter(function (x) { return x.size === size; })[0];
       if (!s) return;
       var rest = Math.max(0, sizeLeft(s)); b.cells[b.sel] = rest ? String(rest) : ""; renderOverlay();
+    },
+    "box-fill-all": function () {
+      var o = current(), b = state.box; if (!o || !b) return;
+      var all = everythingLeft(o, b); if (!all.total) return;
+      Object.keys(all.cells).forEach(function (k) { b.cells[k] = all.cells[k] ? String(all.cells[k]) : ""; });
+      if (!b.edit) b.copies = "1";   // everything left fits in ONE box; "Boxes like this" goes back to ×1
+      if (b.sel === "copies") b.sel = null;
+      renderOverlay();
     },
     "box-next": function () {
       var o = current(), b = state.box; if (!o || !b.sel) return;

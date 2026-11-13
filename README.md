@@ -389,3 +389,12 @@ missing* / *Print original sizes + reorder missing*. Where that field exists the
 (no answer yet = the order as sold, tagged "WRONG SIZES · WAITING ON ACCOUNT MANAGER"), and a change
 saved here sets *Print what was sent* if nobody has answered. Without the field (production today) every
 line means *Print what was sent*, as before.
+
+## Everything left on the order (11-13)
+
+Anthony: "the Catch needs a 'fill this box with everything on the order' setting". In Log Box (and Edit Box),
+under **Rest of S** / **Next size**, a full-width button **Everything left on the order (N)** puts every size's
+"left" into the box in one tap (Edit Box: what's left plus what that box already holds). Sizes with nothing left
+go to 0; extras (Add More) aren't touched; "Boxes like this" goes back to ×1. The catcher can still change any
+size before saving. Disabled ("Nothing left on the order") when every size is boxed. Tablet only, no server or
+Salesforce change.
