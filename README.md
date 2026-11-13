@@ -448,3 +448,12 @@ manager: Credit / Refund / Reprint).
 
 The 11-12 preview link that made `Run_Result__c` records on the order's runs (`_forge.js`, box
 counts as Good, misprints per run) is removed: nothing in The Forge reads them any more.
+
+## Everything left on the order (11-13)
+
+Anthony: "the Catch needs a 'fill this box with everything on the order' setting". In Log Box (and Edit Box),
+under **Rest of S** / **Next size**, a full-width button **Everything left on the order (N)** puts every size's
+"left" into the box in one tap (Edit Box: what's left plus what that box already holds). Sizes with nothing left
+go to 0; extras (Add More) aren't touched; "Boxes like this" goes back to ×1. The catcher can still change any
+size before saving. Disabled ("Nothing left on the order") when every size is boxed. Tablet only, no server or
+Salesforce change.

@@ -1354,6 +1354,23 @@ await test("Org switcher: the tablet shows the org and sends it with every save"
   ok(/e\.key !== "production"/.test(js), "the switcher never offers Production");
 });
 
+await test("Log Box: Everything left on the order fills every size with what's left (11-13)", async () => {
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  // Run the tablet's own function on a pretend order: S 10 (4 boxed), M 20 (all boxed), L 20 (5 boxed).
+  const fnSrc = js.match(/function sizeLeft\(s\) \{[\s\S]*?\n  \}\n/)[0] + js.match(/function everythingLeft\(o, b\) \{[\s\S]*?\n  \}\n/)[0];
+  const cellKey = (li, size) => li + "|" + size;
+  const everythingLeft = new Function("cellKey", fnSrc + "return everythingLeft;")(cellKey);
+  const o = { lines: [{ sizes: [{ size: "S", qty: 10, boxed: 4 }, { size: "M", qty: 20, boxed: 20 }, { size: "L", qty: 20, boxed: 5 }] }] };
+  let r = everythingLeft(o, { cells: {} });
+  ok(r.total === 21 && r.cells["0|S"] === 6 && r.cells["0|M"] === 0 && r.cells["0|L"] === 15, "new box: each size gets what's left (S 6, M 0, L 15)");
+  r = everythingLeft(o, { cells: {}, edit: { orig: { "0|L": 5 } } });
+  ok(r.total === 26 && r.cells["0|L"] === 20, "Edit Box: what's left plus what this box already holds");
+  o.lines[0].sizes.forEach((x) => { x.boxed = x.qty + 2; });
+  ok(everythingLeft(o, { cells: {} }).total === 0, "over-boxed sizes never go negative; nothing left -> 0");
+  ok(/data-act="box-fill-all"/.test(js) && /"box-fill-all": function/.test(js), "button + handler");
+  ok(/if \(!b\.edit\) b\.copies = "1";/.test(js), "Boxes like this goes back to ×1 (everything left fits one box)");
+});
+
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
   reset(); const env = ENV(); const c = await signIn(env, "4821");
   behave.noDeliveryField = true;

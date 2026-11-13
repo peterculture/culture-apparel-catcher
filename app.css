@@ -644,3 +644,6 @@ body.org-test .hdr { box-shadow: inset 0 -4px 0 var(--warn); }
 .orgsw-sheet .dots { justify-content: center; min-height: 1.4rem; }
 .orgsw-sheet .pin-pad button { height: 4.2rem; }
 .orgsw-note { margin: 0; font: 500 .95rem/1.45 'Archivo'; color: var(--text-secondary); }
+
+/* Everything left (11-13): full-width button under Rest of / Next size in Log Box and Edit Box. */
+.quick .fill-all { flex-basis: 100%; border-color: var(--accent, var(--border-strong)); font-weight: 700; }
