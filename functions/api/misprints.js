@@ -29,13 +29,22 @@
  * records are sent "only if nobody changed them since they were read", and the
  * whole save is re-read and retried if somebody did.
  */
-import { json, errorResponse, sfFetch, apiVersion, sfMessage, SF_ID, SfError } from "./_sf.js";
+import { json, errorResponse, sfFetch, apiVersion, sfMessage, SF_ID, SfError, describe } from "./_sf.js";
 import { requireUser, REQ_ID, rememberResult, withRequestId } from "./_session.js";
 import { loadOneOrder } from "./_orders.js";
 
 export const REASONS = ["Stained", "Off-center", "Crooked", "Ink smear", "Wrong color", "Burned", "Hole / damaged", "Other"];
 export const DAMAGED_REASON = "Hole / damaged";
+/* Misprint Details is Text Area(255) in Production today (checked 11-19). The real size is read from
+   Salesforce (detailsMax), so widening the field there gives the Catch more room with no update. */
 const DETAILS_MAX = 255;
+export async function detailsMax(env) {
+  try {
+    const d = await describe(env, "Order");
+    const f = d.fields.find((x) => x.name === "Misprint_Details__c");
+    return f && f.length > 0 ? Math.min(f.length, 32000) : DETAILS_MAX;
+  } catch (_) { return DETAILS_MAX; }
+}
 const TOTAL_MAX = 999;
 
 function clean(s, max) {
@@ -53,19 +62,29 @@ export function existingNotes(details) {
   return String(details || "").replace(/^\s*TOTAL QTY:\s*\d{0,3}\s*/i, "").trim();
 }
 
-/** The new Misprint Details text, or null if it can't fit in 255 characters. */
-export function buildDetails(existing, parts) {
-  const { qty, size, garment, reason, note, who, date } = parts;
-  const base = `${qty} ${size}${garment ? " " + garment : ""} - ${reason}`;
+/**
+ * The new Misprint Details text, or null if even the shortest line can't fit.
+ * 11-19 (20805-2 hit 255 after 4 misprints): lines get shorter before giving up, and on an order with
+ * one garment the garment name is left out (it says nothing there). Longest first:
+ *   2 M True Red Sport Tek ST350LS - Stained: left sleeve (Titus 11/19)
+ *   ... without the note, then without the garment, then "2 M - Stained (Titus)", then "2 M - Stained".
+ */
+export function buildDetails(existing, parts, max = DETAILS_MAX) {
+  const { qty, size, garment, reason, note, who, date, oneGarment } = parts;
+  const g = oneGarment ? "" : garment;
+  const n = note ? ": " + note : "";
   const tries = [
-    `${base}${note ? ": " + note : ""} (${who} ${date})`,
-    `${base} (${who} ${date})`,
-    `${base} (${date})`,
+    `${qty} ${size}${g ? " " + g : ""} - ${reason}${n} (${who} ${date})`,
+    `${qty} ${size}${g ? " " + g : ""} - ${reason} (${who} ${date})`,
+    `${qty} ${size} - ${reason}${n} (${who} ${date})`,
+    `${qty} ${size} - ${reason} (${who} ${date})`,
+    `${qty} ${size} - ${reason} (${who})`,
+    `${qty} ${size} - ${reason}`,
   ];
   const before = existingNotes(existing);
   for (const line of tries) {
     const text = `${before ? before + " | " : ""}${line}`;
-    if (text.length <= DETAILS_MAX) return text;
+    if (text.length <= max) return text;
   }
   return null;
 }
@@ -127,10 +146,11 @@ export async function onRequestPost({ request, env }) {
       if (newTotal > TOTAL_MAX) {
         return json({ error: "too_many", message: "This order already has a very high misprint count. Tell a manager." }, 422);
       }
-      const details = buildDetails(order.misprintDetails, { qty, size, garment, reason, note, who, date });
-      if (!details) {
-        return json({ error: "details_full", message: "The order's misprint notes are full, so nothing was saved. Tell a manager to tidy Misprint Details." }, 422);
-      }
+      // 11-19: notes full no longer blocks the save. The COUNT (order total + the size line, which the
+      // Production Error / reprint screen reads) is always saved; only the note line is left out.
+      const details = buildDetails(order.misprintDetails, { qty, size, garment, reason, note, who, date,
+        oneGarment: order.lines.length <= 1 }, await detailsMax(env));
+      const notesFull = !details;
 
       // The Salesforce line for this size (the first, if the order lists the size more than once).
       const cell = line && line.sizes.find((s) => s.size === size);
@@ -139,7 +159,7 @@ export async function onRequestPost({ request, env }) {
       const subs = [{
         method: "PATCH", url: `/services/data/${v}/sobjects/Order/${order.id}`, referenceId: "order",
         httpHeaders: { "If-Unmodified-Since": HTTP_DATE(order.lastModified) },
-        body: { TotalQtyMisprints__c: newTotal, Misprint_Details__c: details },
+        body: notesFull ? { TotalQtyMisprints__c: newTotal } : { TotalQtyMisprints__c: newTotal, Misprint_Details__c: details },
       }];
       if (item) {
         const sub = { method: "PATCH", url: `/services/data/${v}/sobjects/OrderItem/${item.id}`, referenceId: "line",
@@ -163,6 +183,7 @@ export async function onRequestPost({ request, env }) {
             stored: item ? { field: damaged ? "damaged" : "misprinted", size } : null, extra: isExtra },
           orderId: order.id,
           misprintTotal: newTotal,
+          notesFull,
         };
         await rememberResult(env, requestId, result);
         return json(result, 200);

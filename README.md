@@ -398,3 +398,17 @@ under **Rest of S** / **Next size**, a full-width button **Everything left on th
 go to 0; extras (Add More) aren't touched; "Boxes like this" goes back to ×1. The catcher can still change any
 size before saving. Disabled ("Nothing left on the order") when every size is boxed. Tablet only, no server or
 Salesforce change.
+
+## Misprint notes full (11-19)
+
+On 20805-2 the floor got "The order's misprint notes are full, so nothing was saved" after four misprints:
+`Order.Misprint_Details__c` is **Text Area(255)** in Production, and each line repeated the full garment
+name. Now:
+- **Shorter lines.** On an order with one garment the garment name is left out. When a line doesn't fit, it's
+  shortened step by step: without the note, without the garment, `2 M - Stained (Titus)`, `2 M - Stained`.
+- **Notes full never blocks the count.** If even the shortest line doesn't fit, the misprint is still saved:
+  the order total and the size line (`Misprint_Quantity__c` / `Damaged_Quantity__c`, which the Production
+  Error / reprint screen reads). Misprint Details is left as it is, and the tablet shows an amber
+  "MISPRINT SAVED ... Misprint Details is full, so this one isn't written there; the count is saved."
+- **The field's real size is read from Salesforce** (`detailsMax`, describe of Order, cached 10 minutes). If
+  Misprint Details is changed to a Long Text Area in Salesforce, the Catch uses the room with no update.
