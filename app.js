@@ -1673,7 +1673,8 @@
           // Where it went on the order's lines: that's what the Production Error screen shows (10-27).
           var where = mp.stored ? " Added to the " + mp.size + " line as " + mp.stored.field + " for the Production Error check."
             : mp.extra ? " " + mp.size + " is an extra size (not on the order), so it's in the notes only." : "";
-          showToast({ kind: "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + "." + where + " The print shop has been notified." });
+          if (r.data.notesFull) where += " Misprint Details is full, so this one isn't written there; the count is saved.";
+          showToast({ kind: r.data.notesFull ? "unsure" : "ok", title: "MISPRINT SAVED", body: mp.qty + " × " + mp.size + " " + mp.garment + " · " + mp.reason + " is on " + o.num + "." + where + " The print shop has been notified." });
         }
         state.sheet = null; state.box = null; state.mis = null; state.fin = null; state.dup = null; state.del = null; state.delMany = null;
         if (kind === "box" && opts.andNew && o) {

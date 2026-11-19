@@ -135,6 +135,9 @@ globalThis.fetch = async (url, init = {}) => {
     const tag = u.pathname.includes("068000000000002AAA") ? 2 : 1;
     return new Response(new Uint8Array([0xff, 0xd8, 0xff, tag]), { status: 200, headers: { "Content-Type": "application/octetstream" } });
   }
+  if (u.pathname.endsWith("/sobjects/Order/describe")) {
+    return res(200, { name: "Order", fields: [{ name: "Misprint_Details__c", type: "textarea", length: db.detailsLen || 255 }] });
+  }
   if (u.pathname.endsWith("/sobjects/Order_Packaging__c/describe")) {
     return res(200, { fields: [{ name: "Packaging_Type__c", picklistValues: [
       { value: "Standard Culture Box", label: "Standard Culture Box", active: true, defaultValue: true },
@@ -425,7 +428,7 @@ await test("Report a misprint", async () => {
   const p = posts("/sobjects/Order/801000000000002AAA")[0]; const sent = JSON.parse(p.body);
   ok(Object.keys(sent).sort().join() === "Misprint_Details__c,TotalQtyMisprints__c", "writes only the two misprint fields on the Order");
   ok(sent.TotalQtyMisprints__c === 5, "total 5");
-  ok(/^stained M \(Dev 10\/13\) \| 2 XL Black Richardson 112 Hat - Off-center: left logo \(Maria R\. \d+\/\d+\)$/.test(sent.Misprint_Details__c), "old note + new line, no heading: " + sent.Misprint_Details__c);
+  ok(/^stained M \(Dev 10\/13\) \| 2 XL - Off-center: left logo \(Maria R\. \d+\/\d+\)$/.test(sent.Misprint_Details__c), "old note + new line, no heading; one-garment order: no garment name (11-19): " + sent.Misprint_Details__c);
   ok(sent.Misprint_Details__c.length <= 255, "fits 255");
   ok(!!p.headers["If-Unmodified-Since"], "sent with 'only if unchanged since I read it'");
   const hat = db.items.find((i) => i.OrderId === "801000000000002AAA" && i.Size__c === "XL");
@@ -1369,6 +1372,38 @@ await test("Log Box: Everything left on the order fills every size with what's l
   ok(everythingLeft(o, { cells: {} }).total === 0, "over-boxed sizes never go negative; nothing left -> 0");
   ok(/data-act="box-fill-all"/.test(js) && /"box-fill-all": function/.test(js), "button + handler");
   ok(/if \(!b\.edit\) b\.copies = "1";/.test(js), "Boxes like this goes back to ×1 (everything left fits one box)");
+});
+
+await test("Misprint notes full (20805-2, 11-19): shorter lines first, then the count is still saved", async () => {
+  // The real notes on 20805-2 when the floor got "notes are full": 238 of 255 characters.
+  const full = "1 XL True Red Sport Tek ST350LS - Crooked (Titus 11/19) | 1 XL True Red Sport Tek ST350LS - Ink smear (Titus 11/19) | 6 S True Red Sport Tek ST350LS - Ink smear (Asher 11/19) | 2 M True Red Sport Tek ST350LS - Hole / damaged (Asher 11/19)";
+  ok(full.length === 238, "238 characters, as in Production");
+  const p = { qty: 1, size: "S", garment: "True Red Sport Tek ST350LS", reason: "Stained", note: "", who: "Asher", date: "11/19", oneGarment: true };
+  const t = mis.buildDetails(full, p);
+  ok(t && t.endsWith(" | 1 S - Stained") && t.length <= 255, "before 11-19 this was refused; now the shortest line fits: ..." + (t || "").slice(-30));
+  ok(mis.buildDetails(full, Object.assign({}, p, { oneGarment: false })) === t, "two garments: garment dropped too when that's the only way it fits");
+  ok(mis.buildDetails("", Object.assign({}, p, { oneGarment: false })) === "1 S True Red Sport Tek ST350LS - Stained (Asher 11/19)", "room to spare: full line with the garment");
+  ok(mis.buildDetails("x".repeat(250), p, 4000) && mis.buildDetails("x".repeat(250), p, 4000).length > 255, "a wider field (read from Salesforce) is used");
+
+  // Truly full: the count is still saved, Misprint Details is left as it is, the tablet is told.
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  db.orders.find((o) => o.Id === "801000000000002AAA").Misprint_Details__c = "y".repeat(250);
+  let r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000002AAA", qty: 2, size: "XL", garment: "Black Richardson 112 Hat", reason: "Off-center", requestId: "req-full0001" }, cookie), env });
+  let d = await r.json();
+  const sent = JSON.parse(posts("/sobjects/Order/801000000000002AAA")[0].body);
+  ok(r.status === 200 && d.ok && d.notesFull === true, "saved (200), notesFull: true -- no more 'nothing was saved'");
+  ok(sent.TotalQtyMisprints__c === 5 && !("Misprint_Details__c" in sent), "order total saved; Misprint Details not touched");
+  ok(posts("/sobjects/OrderItem/").length === 1, "the size line's count (Production Error / reprint) is saved");
+  // Wider field in Salesforce: used without an update.
+  reset(); const env2 = ENV(); const c2 = await signIn(env2);
+  db.detailsLen = 32768; db.orders.find((o) => o.Id === "801000000000002AAA").Misprint_Details__c = "y".repeat(250);
+  r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000002AAA", qty: 1, size: "XL", garment: "Black Richardson 112 Hat", reason: "Stained", requestId: "req-full0002" }, c2), env: env2 });
+  d = await r.json();
+  const sent2 = JSON.parse(posts("/sobjects/Order/801000000000002AAA")[0].body);
+  ok(r.status === 200 && !d.notesFull && sent2.Misprint_Details__c.length > 255, "Long Text field: the line is written past 255");
+  db.detailsLen = 0;
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  ok(/r\.data\.notesFull \? "unsure" : "ok"/.test(js), "tablet: amber 'saved, notes full' message");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
