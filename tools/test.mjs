@@ -414,9 +414,14 @@ await test("Misprint details format", async () => {
   ok(mis.existingNotes("TOTAL QTY: 03 stained M") === "stained M", "an old heading is dropped");
   ok(mis.existingNotes("off centered") === "off centered", "free text kept as is");
   const p = { qty: 1, size: "M", garment: "Navy Gildan", reason: "Stained", note: "", who: "Maria R.", date: "10/14" };
-  ok(mis.buildDetails("", p) === "1 M Navy Gildan - Stained (Maria R. 10/14)", "first line, no heading: " + mis.buildDetails("", p));
-  ok(mis.buildDetails("TOTAL QTY: 02 off centered", p) === "off centered | 1 M Navy Gildan - Stained (Maria R. 10/14)", "old heading dropped, notes kept");
-  ok(mis.buildDetails("x".repeat(240), p) === null, "too long -> null");
+  ok(mis.buildDetails("", p) === "M - 1", "first misprint: just size and count: " + mis.buildDetails("", p));
+  ok(mis.buildDetails("M - 6, L - 12", p) === "M - 7, L - 12", "adds to that size's count");
+  ok(mis.buildDetails("L - 12", Object.assign({}, p, { size: "S", qty: 2 })) === "S - 2, L - 12", "sizes in size order");
+  ok(mis.buildDetails("2XL - 1", Object.assign({}, p, { size: "XS" })) === "XS - 1, 2XL - 1", "XS before 2XL");
+  ok(mis.buildDetails("TOTAL QTY: 02 off centered", p) === "off centered | M - 1", "old heading dropped, typed text kept in front");
+  ok(mis.buildDetails("2 M Navy Gildan - Stained (Maria 10/27) | 1 L - Burned (Dev)", p) === "M - 3, L - 1", "old Catch lines folded into the tally");
+  ok(mis.buildDetails("1 Youth M Navy - Stained", Object.assign({}, p, { size: "S", knownSizes: ["Youth M", "S"] })) === "S - 1, Youth M - 1", "old line with a two-word size");
+  ok(mis.buildDetails("x".repeat(250), p) === "M - 1", "no room: typed text gives way to the counts");
 });
 
 await test("Report a misprint", async () => {
@@ -428,7 +433,7 @@ await test("Report a misprint", async () => {
   const p = posts("/sobjects/Order/801000000000002AAA")[0]; const sent = JSON.parse(p.body);
   ok(Object.keys(sent).sort().join() === "Misprint_Details__c,TotalQtyMisprints__c", "writes only the two misprint fields on the Order");
   ok(sent.TotalQtyMisprints__c === 5, "total 5");
-  ok(/^stained M \(Dev 10\/13\) \| 2 XL - Off-center: left logo \(Maria R\. \d+\/\d+\)$/.test(sent.Misprint_Details__c), "old note + new line, no heading; one-garment order: no garment name (11-19): " + sent.Misprint_Details__c);
+  ok(sent.Misprint_Details__c === "stained M (Dev 10/13) | XL - 2", "typed note kept, then the size tally (11-19): " + sent.Misprint_Details__c);
   ok(sent.Misprint_Details__c.length <= 255, "fits 255");
   ok(!!p.headers["If-Unmodified-Since"], "sent with 'only if unchanged since I read it'");
   const hat = db.items.find((i) => i.OrderId === "801000000000002AAA" && i.Size__c === "XL");
@@ -447,7 +452,7 @@ await test("Misprint: two catchers at once don't overwrite each other", async ()
   const o = db.orders[0];
   ok(r.status === 200, "saved after one re-read");
   ok(o.TotalQtyMisprints__c === 3, "2 from the other catcher + 1 = 3 (not 1)");
-  ok(/Burned/.test(o.Misprint_Details__c) && /Stained/.test(o.Misprint_Details__c), "both notes kept: " + o.Misprint_Details__c);
+  ok(o.Misprint_Details__c === "S - 2, M - 1", "both counts kept: " + o.Misprint_Details__c);
 });
 
 await test("Misprint per size on the order line (for the Production Error screen)", async () => {
@@ -1374,25 +1379,21 @@ await test("Log Box: Everything left on the order fills every size with what's l
   ok(/if \(!b\.edit\) b\.copies = "1";/.test(js), "Boxes like this goes back to ×1 (everything left fits one box)");
 });
 
-await test("Misprint notes full (20805-2, 11-19): shorter lines first, then the count is still saved", async () => {
+await test("Misprint notes full (20805-2, 11-19): now a size tally, so it can't fill up", async () => {
   // The real notes on 20805-2 when the floor got "notes are full": 238 of 255 characters.
   const full = "1 XL True Red Sport Tek ST350LS - Crooked (Titus 11/19) | 1 XL True Red Sport Tek ST350LS - Ink smear (Titus 11/19) | 6 S True Red Sport Tek ST350LS - Ink smear (Asher 11/19) | 2 M True Red Sport Tek ST350LS - Hole / damaged (Asher 11/19)";
   ok(full.length === 238, "238 characters, as in Production");
-  const p = { qty: 1, size: "S", garment: "True Red Sport Tek ST350LS", reason: "Stained", note: "", who: "Asher", date: "11/19", oneGarment: true };
-  const t = mis.buildDetails(full, p);
-  ok(t && t.endsWith(" | 1 S - Stained") && t.length <= 255, "before 11-19 this was refused; now the shortest line fits: ..." + (t || "").slice(-30));
-  ok(mis.buildDetails(full, Object.assign({}, p, { oneGarment: false })) === t, "two garments: garment dropped too when that's the only way it fits");
-  ok(mis.buildDetails("", Object.assign({}, p, { oneGarment: false })) === "1 S True Red Sport Tek ST350LS - Stained (Asher 11/19)", "room to spare: full line with the garment");
-  ok(mis.buildDetails("x".repeat(250), p, 4000) && mis.buildDetails("x".repeat(250), p, 4000).length > 255, "a wider field (read from Salesforce) is used");
+  const p = { qty: 1, size: "S", knownSizes: ["S", "M", "L", "XL"] };
+  ok(mis.buildDetails(full, p) === "S - 7, M - 2, XL - 2", "old lines folded into the tally, +1 S: " + mis.buildDetails(full, p));
 
-  // Truly full: the count is still saved, Misprint Details is left as it is, the tablet is told.
+  // Typed text that leaves no room gives way to the counts; the count is saved either way.
   reset(); const env = ENV(); const cookie = await signIn(env);
   db.orders.find((o) => o.Id === "801000000000002AAA").Misprint_Details__c = "y".repeat(250);
   let r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000002AAA", qty: 2, size: "XL", garment: "Black Richardson 112 Hat", reason: "Off-center", requestId: "req-full0001" }, cookie), env });
   let d = await r.json();
   const sent = JSON.parse(posts("/sobjects/Order/801000000000002AAA")[0].body);
-  ok(r.status === 200 && d.ok && d.notesFull === true, "saved (200), notesFull: true -- no more 'nothing was saved'");
-  ok(sent.TotalQtyMisprints__c === 5 && !("Misprint_Details__c" in sent), "order total saved; Misprint Details not touched");
+  ok(r.status === 200 && d.ok && !d.notesFull, "saved (200)");
+  ok(sent.TotalQtyMisprints__c === 5 && sent.Misprint_Details__c === "XL - 2", "order total saved; notes are the tally: " + sent.Misprint_Details__c);
   ok(posts("/sobjects/OrderItem/").length === 1, "the size line's count (Production Error / reprint) is saved");
   // Wider field in Salesforce: used without an update.
   reset(); const env2 = ENV(); const c2 = await signIn(env2);
@@ -1400,7 +1401,7 @@ await test("Misprint notes full (20805-2, 11-19): shorter lines first, then the 
   r = await mis.onRequestPost({ request: req("POST", "/api/misprints", { orderId: "801000000000002AAA", qty: 1, size: "XL", garment: "Black Richardson 112 Hat", reason: "Stained", requestId: "req-full0002" }, c2), env: env2 });
   d = await r.json();
   const sent2 = JSON.parse(posts("/sobjects/Order/801000000000002AAA")[0].body);
-  ok(r.status === 200 && !d.notesFull && sent2.Misprint_Details__c.length > 255, "Long Text field: the line is written past 255");
+  ok(r.status === 200 && !d.notesFull && sent2.Misprint_Details__c.length > 255, "Long Text field: typed text kept in front of the tally");
   db.detailsLen = 0;
   const js = readFileSync(join(root, "app.js"), "utf8");
   ok(/r\.data\.notesFull \? "unsure" : "ok"/.test(js), "tablet: amber 'saved, notes full' message");

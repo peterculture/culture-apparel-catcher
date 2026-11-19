@@ -3,7 +3,7 @@
  *
  * Records a misprint on the ORIGINAL order, in ONE all-or-nothing Salesforce request:
  *   Order      TotalQtyMisprints__c  += qty
- *              Misprint_Details__c   gets one more line ("2 XL Navy Gildan - Stained (Maria 10/27)")
+ *              Misprint_Details__c   a size tally, qty added to its size ("M - 7, L - 12"; 11-19)
  *   OrderItem  the matching size line of that garment:
  *              Damaged_Quantity__c  += qty   when the reason is "Hole / damaged"
  *              Misprint_Quantity__c += qty   for every other reason
@@ -62,31 +62,53 @@ export function existingNotes(details) {
   return String(details || "").replace(/^\s*TOTAL QTY:\s*\d{0,3}\s*/i, "").trim();
 }
 
-/**
- * The new Misprint Details text, or null if even the shortest line can't fit.
- * 11-19 (20805-2 hit 255 after 4 misprints): lines get shorter before giving up, and on an order with
- * one garment the garment name is left out (it says nothing there). Longest first:
- *   2 M True Red Sport Tek ST350LS - Stained: left sleeve (Titus 11/19)
- *   ... without the note, then without the garment, then "2 M - Stained (Titus)", then "2 M - Stained".
- */
-export function buildDetails(existing, parts, max = DETAILS_MAX) {
-  const { qty, size, garment, reason, note, who, date, oneGarment } = parts;
-  const g = oneGarment ? "" : garment;
-  const n = note ? ": " + note : "";
-  const tries = [
-    `${qty} ${size}${g ? " " + g : ""} - ${reason}${n} (${who} ${date})`,
-    `${qty} ${size}${g ? " " + g : ""} - ${reason} (${who} ${date})`,
-    `${qty} ${size} - ${reason}${n} (${who} ${date})`,
-    `${qty} ${size} - ${reason} (${who} ${date})`,
-    `${qty} ${size} - ${reason} (${who})`,
-    `${qty} ${size} - ${reason}`,
-  ];
-  const before = existingNotes(existing);
-  for (const line of tries) {
-    const text = `${before ? before + " | " : ""}${line}`;
-    if (text.length <= max) return text;
+/* 11-19 (Anthony): Misprint Details is just a tally of sizes and counts -- "M - 7, L - 12" -- no
+   reason, garment, note, name or date. Each save adds its qty to that size's number and rewrites the
+   tally, so the field stays short however many misprints an order gets. (The count per size and the
+   order total are also saved on the order lines / TotalQtyMisprints__c as before.)
+   Lines written the old way ("2 M Navy Gildan - Stained (Maria 10/27)") are folded into the tally the
+   next time a misprint is saved. Text a person typed that isn't a size count is kept, in front. */
+const SIZE_RANK = ["NB", "3M", "6M", "12M", "18M", "24M", "2T", "3T", "4T", "5T", "YXS", "YS", "YM", "YL", "YXL",
+  "XXS", "XS", "S", "M", "L", "XL", "2XL", "XXL", "3XL", "XXXL", "4XL", "5XL", "6XL", "OS", "OSFA"];
+const rankOf = (s) => { const i = SIZE_RANK.indexOf(String(s).toUpperCase().replace(/\s+/g, "")); return i < 0 ? 999 : i; };
+
+/** Existing notes -> { tally: Map(size -> qty), other: [text that isn't a count] }. */
+export function parseTally(existing, knownSizes = []) {
+  const tally = new Map(); const other = [];
+  const known = [...new Set(knownSizes.filter(Boolean))].sort((a, b) => b.length - a.length);
+  const add = (size, q) => tally.set(size, (tally.get(size) || 0) + q);
+  for (const raw of existingNotes(existing).split(/\s*[|\n]\s*/)) {
+    const seg = raw.trim();
+    if (!seg) continue;
+    const items = seg.split(/\s*,\s*/).map((x) => x.match(/^(.+?)\s+-\s+(\d{1,4})$/));   // new: "M - 7, L - 12"
+    if (items.every(Boolean)) { items.forEach((m) => add(m[1].trim(), Number(m[2]))); continue; }
+    const m = seg.match(/^(\d{1,3})\s+(.+?)\s+-\s+\S/);                                  // old: "2 M Navy Gildan - Stained (...)"
+    if (m) {
+      const rest = m[2];
+      const size = known.find((k) => rest === k || rest.startsWith(k + " ")) || rest.split(" ")[0];
+      add(size, Number(m[1])); continue;
+    }
+    other.push(seg);
   }
-  return null;
+  return { tally, other };
+}
+
+/** "M - 7, L - 12" in size order (sizes we don't know keep the order they came in). */
+export function formatTally(tally) {
+  return [...tally.entries()].map((e, i) => [e, i])
+    .sort((a, b) => rankOf(a[0][0]) - rankOf(b[0][0]) || a[1] - b[1])
+    .map(([[s, q]]) => `${s} - ${q}`).join(", ");
+}
+
+/** The new Misprint Details text with qty added to size, or null if it can't fit. */
+export function buildDetails(existing, parts, max = DETAILS_MAX) {
+  const { qty, size, knownSizes } = parts;
+  const { tally, other } = parseTally(existing, [size, ...(knownSizes || [])]);
+  tally.set(size, (tally.get(size) || 0) + qty);
+  const counts = formatTally(tally);
+  const withOther = other.length ? other.join(" | ") + " | " + counts : counts;
+  if (withOther.length <= max) return withOther;
+  return counts.length <= max ? counts : null;   // no room: the typed text gives way to the counts
 }
 
 /** "Navy Gildan 5000 Tee" -- how the tablet names a garment (colour + product, 40 characters). */
@@ -131,7 +153,6 @@ export async function onRequestPost({ request, env: siteEnv }) {
 
     return await withRequestId(env, requestId, 200, async () => {
     const who = auth.user.name;
-    const date = shopDate();
     const damaged = reason === DAMAGED_REASON;
     const field = damaged ? "Damaged_Quantity__c" : "Misprint_Quantity__c";
     const v = apiVersion(env);
@@ -152,8 +173,8 @@ export async function onRequestPost({ request, env: siteEnv }) {
       }
       // 11-19: notes full no longer blocks the save. The COUNT (order total + the size line, which the
       // Production Error / reprint screen reads) is always saved; only the note line is left out.
-      const details = buildDetails(order.misprintDetails, { qty, size, garment, reason, note, who, date,
-        oneGarment: order.lines.length <= 1 }, await detailsMax(env));
+      const knownSizes = order.lines.flatMap((l) => [...l.sizes.map((x) => x.size), ...(l.extras || []).map((x) => x.size)]);
+      const details = buildDetails(order.misprintDetails, { qty, size, knownSizes }, await detailsMax(env));
       const notesFull = !details;
 
       // The Salesforce line for this size (the first, if the order lists the size more than once).

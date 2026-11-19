@@ -97,8 +97,8 @@ Pages project, its own Salesforce connection and its own PIN list.
   That writes the number of boxes to `Order.Packaging_Count__c` and the order leaves the
   board. (The board remembers which orders it has shown in KV, key `board:seen`, for 14 days.)
 - **Report Misprint (changed 10-27):** one all-or-nothing Salesforce request (`/composite`, allOrNone):
-  - on the Order, adds to `TotalQtyMisprints__c` and adds one line to `Misprint_Details__c`
-    (no "TOTAL QTY: NN" heading any more; an old heading is dropped the next time a line is added);
+  - on the Order, adds to `TotalQtyMisprints__c` and adds the qty to that size in `Misprint_Details__c`,
+    which is just a size tally: `M - 7, L - 12` (11-19; no reason, garment, name or date);
   - on the matching **size line** of that garment (OrderItem), adds the count to `Misprint_Quantity__c`,
     or to `Damaged_Quantity__c` when the reason is "Hole / damaged".
   The **Production Error** button runs the flow "SCREEN Order Reprint Process2", whose first screen is a
@@ -461,13 +461,15 @@ Salesforce change.
 ## Misprint notes full (11-19)
 
 On 20805-2 the floor got "The order's misprint notes are full, so nothing was saved" after four misprints:
-`Order.Misprint_Details__c` is **Text Area(255)** in Production, and each line repeated the full garment
-name. Now:
-- **Shorter lines.** On an order with one garment the garment name is left out. When a line doesn't fit, it's
-  shortened step by step: without the note, without the garment, `2 M - Stained (Titus)`, `2 M - Stained`.
-- **Notes full never blocks the count.** If even the shortest line doesn't fit, the misprint is still saved:
-  the order total and the size line (`Misprint_Quantity__c` / `Damaged_Quantity__c`, which the Production
-  Error / reprint screen reads). Misprint Details is left as it is, and the tablet shows an amber
-  "MISPRINT SAVED ... Misprint Details is full, so this one isn't written there; the count is saved."
-- **The field's real size is read from Salesforce** (`detailsMax`, describe of Order, cached 10 minutes). If
-  Misprint Details is changed to a Long Text Area in Salesforce, the Catch uses the room with no update.
+`Order.Misprint_Details__c` is **Text Area(255)** in Production, and each line repeated the reason, the full
+garment name, who and when. Now (Anthony, 11-19) **Misprint Details is only a size tally**:
+`S - 7, M - 2, XL - 2`. Each misprint adds its qty to its size and the tally is rewritten, sizes in size
+order, so the field stays short however many misprints an order gets.
+- **Old lines are folded in.** Lines written the old way (`2 M Navy Gildan - Stained (Maria 10/27)`) are
+  counted into the tally the next time a misprint is saved on that order.
+- **Typed text** that isn't a size count is kept in front (`off centered | M - 1`); if there's no room for
+  it, the counts win.
+- **The count is always saved**: the order total and the size line (`Misprint_Quantity__c` /
+  `Damaged_Quantity__c`, which the Production Error / reprint screen reads). If even the tally can't fit,
+  Misprint Details is left as it is and the tablet shows an amber "MISPRINT SAVED ... notes full".
+- **The field's real size is read from Salesforce** (`detailsMax`, describe of Order, cached 10 minutes).
