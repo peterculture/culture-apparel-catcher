@@ -649,7 +649,7 @@
       return '<button data-act="pin" data-k="' + k + '" class="' + (k === "<" || k === "C" ? "k2" : "") + '" aria-label="' + aria + '">' + label + "</button>";
     }).join("");
     return '<div class="pin-wrap ca-season-pin"><div class="pin-box">' +
-      '<img class="pin-logo" src="/brand/catch-logo.png" alt="The Catch · Culture Apparel" width="623" height="636">' + seasonChip(false) +
+      '<div class="pin-lockup" role="img" aria-label="The Catch by Noble Made"><span class="nm-mark"></span><span class="nm-catch-wrap"><span class="nm-catch"></span></span><div class="nm-by">by <span class="nm-wordmark"></span></div></div>' + seasonChip(false) +
       "<h1>WHO'S CATCHING?</h1><p>Enter your 4-digit PIN</p>" +
       (state.signoutMsg ? '<div class="pin-note">' + esc(state.signoutMsg) + "</div>" : "") +
       '<div class="dots" id="dots">' + dots + "</div>" +
