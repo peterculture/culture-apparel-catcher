@@ -1356,7 +1356,8 @@ await test("Packing slips (11-24): order name read, mockup for an order that has
   ok(g.length === 1 && g[0].garment === "Gildan 5000 Tee · Navy" && g[0].sizes.map((s) => s.size).join() === "M,L,2XL" && g[0].total === 29, "box 2 by garment, sizes in the order's own order, extra last");
   const h = lib.slipHtml(ord, ord.boxes[1], 1, 2, "blob:mock");
   ok(/21379-1/.test(h) && /BOX 2 OF 2/.test(h) && /Good Life Training - Team Tees 21379/.test(h) && /Tees 2 · Standard Culture Box/.test(h), "slip: number, BOX 2 OF 2, order name, garment + packaging type");
-  ok(/2XL\*/.test(h) && /class="sl-c x"/.test(h) && /\* extra, not on the order/.test(h) && /29 PCS IN THIS BOX/.test(h), "slip: extra size marked, box total");
+  ok(/2XL\*/.test(h) && /class="sl-c sl-x"/.test(h) && /\* extra, not on the order/.test(h) && /<em>29<\/em> PCS IN THIS BOX/.test(h), "slip: extra size marked, box total");
+  ok(/<img class="sl-logo" alt="Noble Made" src="brand\/nm-horizontal-dark-maroon\.png">/.test(h) && /CUSTOM APPAREL · FRANKLIN, TN/.test(h), "slip: Noble Made lockup + tagline (style match doc)");
   ok(/<img alt="" src="blob:mock">/.test(h), "slip: the mockup picture");
   ok(/NO MOCKUP/.test(lib.slipHtml(ord, ord.boxes[0], 0, 2, null)), "no mockup -> says so");
   const noName = lib.slipHtml(Object.assign({}, ord, { orderName: "" }), ord.boxes[0], 0, 2, null);
@@ -1370,6 +1371,8 @@ await test("Packing slips (11-24): order name read, mockup for an order that has
   const css = readFileSync(join(root, "app.css"), "utf8");
   ok(/@page \{ size: 4in 6in; margin: 0; \}/.test(css) && /\.slip \{[^}]*height: 6in/.test(css) && /break-after: page/.test(css), "print: 4x6 page, one slip per page");
   ok(/#print-slips \{ display: none; \}/.test(css), "slips never show on screen");
+  ok(/\.sl-num \{ font: 500 27pt\/1 'Playfair Display'/.test(css) && /\.sl-brand \{[^}]*border-bottom: 2\.5px solid #752330/.test(css) && /\.sl-tot \{[^}]*background: #551C25; color: #F5ECDA/.test(css), "Noble Made look: Playfair number, heritage rule, crimson total band");
+  ok(!/\.sl-[a-z]+ \{[^}]*[^-]color: #AC844B/.test(css), "suede gold never used for slip text (prints grainy on thermal)");
 });
 
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {

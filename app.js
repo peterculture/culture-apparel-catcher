@@ -1024,17 +1024,20 @@
     var body = groups.length ? groups.map(function (g) {
       return '<div class="sl-g">' + (g.garment ? '<div class="sl-gn">' + esc(g.garment) + "</div>" : "") +
         '<div class="sl-sz">' + g.sizes.map(function (s) {
-          return '<div class="sl-c' + (s.extra ? " x" : "") + '"><div class="sl-s">' + esc(s.size) + (s.extra ? "*" : "") + '</div><div class="sl-q">' + s.qty + "</div></div>";
+          return '<div class="sl-c' + (s.extra ? " sl-x" : "") + '"><div class="sl-s">' + esc(s.size) + (s.extra ? "*" : "") + '</div><div class="sl-q">' + s.qty + "</div></div>";
         }).join("") + "</div></div>";
     }).join("") : '<div class="sl-raw">' + esc(b.sizes || (b.qty + " garments")) + "</div>";
     var anyExtra = groups.some(function (g) { return g.sizes.some(function (s) { return s.extra; }); });
+    // 11-24 (Anthony: "make it match this style match document"): Noble Made look -- maroon lockup + tagline over a
+    // heritage rule, Playfair for the number / name / counts, Barlow Condensed labels, a crimson total band.
     return '<section class="slip">' +
+      '<div class="sl-brand"><img class="sl-logo" alt="Noble Made" src="brand/nm-horizontal-dark-maroon.png"><span class="sl-tag">CUSTOM APPAREL · FRANKLIN, TN</span></div>' +
       '<div class="sl-head"><div class="sl-num">' + esc(o.num) + '</div><div class="sl-box">BOX ' + (i + 1) + " OF " + n + "</div></div>" +
       '<div class="sl-name">' + esc(o.orderName || o.customer || "") + "</div>" +
       (o.orderName && o.customer ? '<div class="sl-cust">' + esc(o.customer) + "</div>" : "") +
-      '<div class="sl-meta">' + esc(b.name || "") + (b.type ? " · " + esc(b.type) : "") + "</div>" +
+      '<div class="sl-meta"><span class="sl-k">IN THIS BOX</span>' + esc(b.name || "") + (b.type ? " · " + esc(b.type) : "") + "</div>" +
       '<div class="sl-body">' + body + "</div>" +
-      '<div class="sl-tot"><span>' + (anyExtra ? "* extra, not on the order" : "") + '</span><b>' + (Number(b.qty) || 0) + " PCS IN THIS BOX</b></div>" +
+      '<div class="sl-tot"><span>' + (anyExtra ? "* extra, not on the order" : "") + '</span><b><em>' + (Number(b.qty) || 0) + "</em> PCS IN THIS BOX</b></div>" +
       '<div class="sl-mock">' + (mockUrl ? '<img alt="" src="' + esc(mockUrl) + '">' : '<span>NO MOCKUP</span>') + "</div>" +
       "</section>";
   }
@@ -1054,8 +1057,9 @@
     mockP.then(function (url) {
       var host = slipHost();
       host.innerHTML = boxes.map(function (b, i) { return slipHtml(o, b, i, boxes.length, url); }).join("");
-      var img = host.querySelector(".sl-mock img");
-      var ready = img && !img.complete ? new Promise(function (r) { img.onload = img.onerror = r; setTimeout(r, 4000); }) : Promise.resolve();
+      // Wait for the pictures the first slip uses (the mockup and the Noble Made logo), at most 4 s.
+      var imgs = Array.prototype.slice.call(host.querySelectorAll(".slip:first-child img")).filter(function (im) { return !im.complete; });
+      var ready = Promise.all(imgs.map(function (im) { return new Promise(function (r) { im.onload = im.onerror = r; setTimeout(r, 4000); }); }));
       return ready.then(function () {
         if (!url) showToast({ kind: "unsure", title: "NO MOCKUP FOR " + o.num, body: "The slips print without a picture." });
         done();

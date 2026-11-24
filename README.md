@@ -45,6 +45,11 @@ Pages project, its own Salesforce connection and its own PIN list.
   tablet's normal print dialog: order number, BOX i OF n, the order name (`Order.Customer_Order_Name__c`; the
   customer name when that can't be read), the box's Garment Type and Packaging Type, its size counts by garment
   from Quantity + Size Counted (extras marked `*`), the box total, and the order's mockup. Nothing is saved.
+  - **Noble Made look** (the "style match - themes" doc): maroon Noble Made logo + "CUSTOM APPAREL · FRANKLIN, TN"
+    over a heritage-red rule, Playfair Display for the order number / name / counts, Barlow Condensed labels, a crimson
+    total band with canvas text, suede hairlines around the mockup. Brand colours are written as hex in the print CSS
+    (a slip is always on white paper, whatever the tablet's theme). Dark brand colours print solid on a thermal label
+    printer; suede is never used for text.
   - `Customer_Order_Name__c` is an optional field like Delivery Method: read only while the app's login can see
     it. **Needs once:** run `tools/catcher-app-access.apex` again in Production (it now grants read on it).
   - The mockup endpoint now also serves an order that has left the board, read the way Past Orders reads it
