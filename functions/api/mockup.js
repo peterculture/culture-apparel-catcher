@@ -13,7 +13,7 @@
  */
 import { json, errorResponse, SF_ID } from "./_sf.js";
 import { requireUser } from "./_session.js";
-import { loadOneOrder } from "./_orders.js";
+import { loadOneOrder, loadReviewOrder } from "./_orders.js";
 import { mockupUrlsFor, mockupFilesFor, fetchMockup, fetchFileMockup } from "./_mockup.js";
 
 const CACHE_SECONDS = 600;
@@ -47,7 +47,12 @@ export async function onRequestGet({ request, env, waitUntil }) {
     }
 
     const pic = await (async () => {
-      const order = await loadOneOrder(env, orderId);
+      /* 11-24: packing slips are printed from Past Orders too, once the order has left the board, so an order
+         that isn't on the board is read the way Past Orders reads it (one of the shop's own printers). */
+      const order = await loadOneOrder(env, orderId).catch((e) => {
+        if (e && e.code === "order_not_in_production") return loadReviewOrder(env, orderId);
+        throw e;
+      });
       const files = (await mockupFilesFor(env, [order])).get(order.id) || [];
       if (files.length) return files[n] ? fetchFileMockup(env, files[n].cv) : { none: true };
       const raw = n === 0 ? (await mockupUrlsFor(env, [order])).get(order.id) : null;

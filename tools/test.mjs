@@ -1307,6 +1307,71 @@ await test("Misprint notes full (20805-2, 11-19): now a size tally, so it can't 
   ok(/r\.data\.notesFull \? "unsure" : "ok"/.test(js), "tablet: amber 'saved, notes full' message");
 });
 
+await test("Packing slips (11-24): order name read, mockup for an order that has left the board, slip builder", async () => {
+  // Server: order name (Customer_Order_Name__c) comes through, as text
+  reset(); const env = ENV(); const cookie = await signIn(env);
+  db.orders[0].Customer_Order_Name__c = "Good Life Training - <b>Team Tees</b> 21379";
+  let r = await orders.onRequestGet({ request: req("GET", "/api/orders", null, cookie), env });
+  const o1 = (await r.json()).orders.find((o) => o.id === "801000000000001AAA");
+  ok(o1 && o1.orderName === "Good Life Training - Team Tees 21379", "order name read and sent as plain text: " + (o1 && o1.orderName));
+  const q = calls.filter((c) => /query/.test(c.url)).map((c) => decodeURIComponent(c.url)).find((u) => /FROM Order/.test(u)) || "";
+  ok(/Customer_Order_Name__c/.test(q), "the order query asks for Customer_Order_Name__c");
+  // Mockup: an order no longer on the board (finished / moved on) still gets its picture, as Past Orders reads it
+  reset(); const env2 = ENV(); const c2 = await signIn(env2);
+  db.orders[0]._inProd = false;
+  r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA", null, c2), env: env2 });
+  ok(r.status === 200 && r.headers.get("Content-Type") === "image/jpeg", "off-board shop order -> its mockup (" + r.status + ")");
+  const om = readFileSync(join(root, "functions/api/_orders.js"), "utf8");
+  ok(/export async function loadReviewOrders[\s\S]{0,400}Printer__r\.Name IN/.test(om), "that read is limited to the shop's own printers (as Past Orders)");
+  const mj = readFileSync(join(root, "functions/api/mockup.js"), "utf8");
+  ok(/e\.code === "order_not_in_production"\) return loadReviewOrder/.test(mj), "only 'not on the board' falls back; other errors still refuse");
+  r = await mockup.onRequestGet({ request: req("GET", "/api/mockup?orderId=801000000000001AAA"), env: env2 });
+  ok(r.status === 401, "not signed in -> 401");
+  const apex = readFileSync(join(root, "tools/catcher-app-access.apex"), "utf8");
+  ok(/'Order\.Customer_Order_Name__c' => false/.test(apex), "access script grants read on the order name");
+
+  // Tablet: the slip builder, run straight from app.js
+  const js = readFileSync(join(root, "app.js"), "utf8");
+  const fnSrc = (name) => {
+    const i = js.indexOf("function " + name + "(");
+    if (i < 0) throw new Error("no function " + name);
+    let d = 0, j = js.indexOf("{", i);
+    for (let k = j; k < js.length; k++) { if (js[k] === "{") d++; else if (js[k] === "}" && --d === 0) return js.slice(i, k + 1); }
+  };
+  const lib = new Function("state", "ICON", ["esc", "boxedSplit", "slipsReady", "slipsBtn", "slipGroups", "slipHtml"].map(fnSrc).join("\n") +
+    "\nreturn { slipsReady, slipsBtn, slipGroups, slipHtml };")({ printing: false }, { print: "<svg/>" });
+  const ord = { id: "801x", num: "21379-1", customer: "Good Life Training", orderName: "Good Life Training - Team Tees 21379", total: 56,
+    lines: [{ product: "Gildan 5000 Tee", color: "Navy", sizes: [{ size: "S" }, { size: "M" }, { size: "L" }] }],
+    boxes: [
+      { id: "b1", name: "Tees 1", type: "Standard Culture Box", qty: 30, sizes: "S 12 · M 18 = 30", counts: [{ line: 0, size: "M", qty: 18 }, { line: 0, size: "S", qty: 12 }] },
+      { id: "b2", name: "Tees 2", type: "Standard Culture Box", qty: 29, sizes: "M 2 · L 24 · 2XL 3 (extra) = 29", counts: [{ line: 0, size: "L", qty: 24 }, { line: 0, size: "M", qty: 2 }, { line: 0, size: "2XL", qty: 3, extra: true }] },
+    ] };
+  ok(lib.slipsReady(ord) === true, "every garment boxed (56 of 56, extras aside) -> slips ready");
+  ok(/PRINT PACKING SLIPS · 2 BOXES/.test(lib.slipsBtn(ord)) && /data-act="print-slips"/.test(lib.slipsBtn(ord)), "button: PRINT PACKING SLIPS · 2 BOXES");
+  const short = Object.assign({}, ord, { boxes: [ord.boxes[0]] });
+  ok(lib.slipsReady(short) === false && lib.slipsBtn(short) === "", "30 of 56 boxed -> no button");
+  ok(lib.slipsReady(Object.assign({}, ord, { boxes: [] })) === false, "no boxes -> no button");
+  ok(lib.slipsReady(Object.assign({}, ord, { total: 0 })) === false, "no garment total (fulfillment / no sizes) -> no button");
+  const g = lib.slipGroups(ord, ord.boxes[1]);
+  ok(g.length === 1 && g[0].garment === "Gildan 5000 Tee · Navy" && g[0].sizes.map((s) => s.size).join() === "M,L,2XL" && g[0].total === 29, "box 2 by garment, sizes in the order's own order, extra last");
+  const h = lib.slipHtml(ord, ord.boxes[1], 1, 2, "blob:mock");
+  ok(/21379-1/.test(h) && /BOX 2 OF 2/.test(h) && /Good Life Training - Team Tees 21379/.test(h) && /Tees 2 · Standard Culture Box/.test(h), "slip: number, BOX 2 OF 2, order name, garment + packaging type");
+  ok(/2XL\*/.test(h) && /class="sl-c x"/.test(h) && /\* extra, not on the order/.test(h) && /29 PCS IN THIS BOX/.test(h), "slip: extra size marked, box total");
+  ok(/<img alt="" src="blob:mock">/.test(h), "slip: the mockup picture");
+  ok(/NO MOCKUP/.test(lib.slipHtml(ord, ord.boxes[0], 0, 2, null)), "no mockup -> says so");
+  const noName = lib.slipHtml(Object.assign({}, ord, { orderName: "" }), ord.boxes[0], 0, 2, null);
+  ok(/class="sl-name">Good Life Training</.test(noName) && !/sl-cust/.test(noName), "no order name readable -> the customer instead");
+  const old = { id: "b0", name: "Tees 1", type: "", qty: 40, sizes: "", counts: [] };
+  ok(/40 garments/.test(lib.slipHtml(ord, old, 0, 1, null)), "a box with no size breakdown -> its total");
+  ok(/<script>/.test(lib.slipHtml(Object.assign({}, ord, { orderName: "<script>" }), ord.boxes[0], 0, 1, null)) === false, "text is escaped");
+  // Wiring
+  ok(/finishBtn\(o\) \+ slipsBtn\(o\)/.test(js) && /slipsBtn\(o\) \+\s*boxLogHtml\(o, false/.test(js), "button on the board order and on the Past Orders order");
+  ok(/"print-slips": function \(\) \{ printSlips\(current\(\)\); \}/.test(js) && /window\.print\(\)/.test(js) && /afterprint/.test(js), "button prints, slips cleared after printing");
+  const css = readFileSync(join(root, "app.css"), "utf8");
+  ok(/@page \{ size: 4in 6in; margin: 0; \}/.test(css) && /\.slip \{[^}]*height: 6in/.test(css) && /break-after: page/.test(css), "print: 4x6 page, one slip per page");
+  ok(/#print-slips \{ display: none; \}/.test(css), "slips never show on screen");
+});
+
 await test("Delivery Method not readable yet: orders still load, badge hidden (runs last: turns the field off for 10 min)", async () => {
   reset(); const env = ENV(); const c = await signIn(env, "4821");
   behave.noDeliveryField = true;

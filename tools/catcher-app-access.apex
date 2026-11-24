@@ -81,6 +81,7 @@ Map<String, Boolean> fields = new Map<String, Boolean>{
     'Order.Packaging_Count__c' => true,
     'Order.Size_Changes__c' => true,         // 11-04: Sizes changed (create the field first; see tools/catcher-size-changes.apex)
     'Order.Shipping_Delivery__c' => false,   // 10-27: Delivery Method badge (read only)
+    'Order.Customer_Order_Name__c' => false, // 11-24: order name on the packing slips (read only)
     'OrderItem.Size__c' => false, 'OrderItem.Color__c' => false,
     'Product2.Family' => false,              // 11-02: box names (Hoodies / Crewnecks / Long Sleeves...), read only
     'OrderItem.Misprint_Quantity__c' => true, 'OrderItem.Damaged_Quantity__c' => true,

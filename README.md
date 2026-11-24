@@ -39,6 +39,16 @@ Pages project, its own Salesforce connection and its own PIN list.
     copies it, Edit Box can change it, and Report Misprint offers it as a size.
   - The server accepts a size that isn't on the order ONLY when it's marked extra, and only as a short
     size name on one of the order's own garments.
+- **Packing slips (11-24):** once every garment on an order is boxed (boxes add up to the order's total; extras
+  don't count toward it), a **PRINT PACKING SLIPS · N BOXES** button shows on the order -- on the In Production
+  board and in Past Orders. It prints one **4×6 label per box** (`@page 4in 6in`, one slip per page) through the
+  tablet's normal print dialog: order number, BOX i OF n, the order name (`Order.Customer_Order_Name__c`; the
+  customer name when that can't be read), the box's Garment Type and Packaging Type, its size counts by garment
+  from Quantity + Size Counted (extras marked `*`), the box total, and the order's mockup. Nothing is saved.
+  - `Customer_Order_Name__c` is an optional field like Delivery Method: read only while the app's login can see
+    it. **Needs once:** run `tools/catcher-app-access.apex` again in Production (it now grants read on it).
+  - The mockup endpoint now also serves an order that has left the board, read the way Past Orders reads it
+    (one of the shop's own printers), so slips printed from Past Orders get their picture.
 - **Save Box & New:** saves the box exactly like SAVE BOX; once Salesforce confirms, a fresh blank
   box form opens for the next box. If the save fails, everything typed stays on screen.
 - **Duplicate Box:** every saved box has a DUPLICATE BOX button. It asks "How many duplicates would you

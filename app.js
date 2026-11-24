@@ -154,6 +154,7 @@
     tick: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     check: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     bang: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8M12 18v.01"/></svg>',
+    print: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>',
     shirt: '<svg width="70%" height="70%" viewBox="0 0 48 48" aria-hidden="true"><path d="M17 8 L9 12 L5 20 L10 23 L13 19 L13 41 L35 41 L35 19 L38 23 L43 20 L39 12 L31 8 Q24 13 17 8 Z" fill="#2a2a30" stroke="#4a4a52" stroke-width="1.2"/></svg>'
   };
 
@@ -793,7 +794,7 @@
       '<div class="stat"><div class="l">MISPRINTS</div><div class="v' + (o.misprintTotal ? " warn" : "") + '">' + o.misprintTotal + "</div></div></div>" +
       '<div class="actions"><button class="big big-red" data-act="open-box">' + ICON.box + "LOG BOXES</button>" +
       '<button class="big big-warn" data-act="open-mis">' + ICON.warn + "REPORT MISPRINT</button></div>" +
-      finishBtn(o) +
+      finishBtn(o) + slipsBtn(o) +
       boxLogHtml(o, true, "BOXES ON THIS ORDER", log, "No boxes logged yet.", misLog) +
       "</main>";
   }
@@ -967,6 +968,7 @@
       '<div class="stats"><div class="stat"><div class="l">BOXES</div><div class="v">' + o.boxes.length + "</div></div>" +
       '<div class="stat"><div class="l">BOXED</div><div class="v">' + boxed + " <small>/ " + o.total + (split.extra ? " · +" + split.extra + " extra" : "") + "</small></div></div>" +
       '<div class="stat"><div class="l">EDITABLE</div><div class="v">' + open + "</div></div></div>" +
+      slipsBtn(o) +
       boxLogHtml(o, false, "BOXES ON THIS ORDER (FROM SALESFORCE)", boxRowsHtml(o, false), "No boxes on this order any more.", "") + "</main>";
   }
 
@@ -980,6 +982,90 @@
   }
 
   function isFulfillment(o) { return !!o.finished && Number(o.finishedCount) === 0 && !o.boxes.length; }
+
+  /* ------------------------------------------------------ packing slips --- */
+  // 11-24 (Anthony: "After all garments are logged and box records are created, can we start building packing
+  // slips with the order name, order number, a breakdown of the quantity/size is in every single box on the
+  // order, and a mockup image that the shop guys can print to put in each box"; 4x6 label printer; only once
+  // every garment is boxed). One 4x6 slip per box record: order name + number, BOX i OF n, the box's garment
+  // type and packaging type, its size counts by garment (from Quantity + Size Counted), its total, and the
+  // order's mockup. Built into #print-slips and printed with the browser's own print (app.css @page 4in 6in).
+  /** Every garment on the order is in a box (extras don't count toward it). */
+  function slipsReady(o) {
+    if (!o || !o.boxes || !o.boxes.length || !(o.total > 0)) return false;
+    return boxedSplit(o).ordered >= o.total;
+  }
+  function slipsBtn(o) {
+    if (!slipsReady(o)) return "";
+    var n = o.boxes.length;
+    return '<button class="big big-slip" data-act="print-slips"' + (state.printing ? " disabled" : "") + ">" + ICON.print +
+      (state.printing ? "GETTING SLIPS READY…" : "PRINT PACKING SLIPS · " + n + (n === 1 ? " BOX" : " BOXES")) + "</button>";
+  }
+  /** One box's contents, garment by garment, sizes in the order's own order: [{ garment, sizes:[{size, qty, extra}], total }]. */
+  function slipGroups(o, b) {
+    var byLine = {};
+    (b.counts || []).forEach(function (c) {
+      if (!(c.qty > 0)) return;
+      var key = c.line != null ? String(c.line) : "?";
+      (byLine[key] = byLine[key] || []).push(c);
+    });
+    return Object.keys(byLine).sort(function (x, y) { return (Number(x) || 0) - (Number(y) || 0); }).map(function (k) {
+      var l = o.lines[Number(k)] || null;
+      var order = l ? l.sizes.map(function (s) { return s.size; }) : [];
+      var sizes = byLine[k].slice().sort(function (a, c) {
+        var ia = order.indexOf(a.size), ic = order.indexOf(c.size);
+        return (ia < 0 ? 999 : ia) - (ic < 0 ? 999 : ic);
+      }).map(function (c) { return { size: c.size, qty: c.qty, extra: !!c.extra }; });
+      return { garment: l ? (l.product + (l.color ? " · " + l.color : "")) : "", sizes: sizes, total: sizes.reduce(function (a, c) { return a + c.qty; }, 0) };
+    });
+  }
+  function slipHtml(o, b, i, n, mockUrl) {
+    var groups = slipGroups(o, b);
+    var body = groups.length ? groups.map(function (g) {
+      return '<div class="sl-g">' + (g.garment ? '<div class="sl-gn">' + esc(g.garment) + "</div>" : "") +
+        '<div class="sl-sz">' + g.sizes.map(function (s) {
+          return '<div class="sl-c' + (s.extra ? " x" : "") + '"><div class="sl-s">' + esc(s.size) + (s.extra ? "*" : "") + '</div><div class="sl-q">' + s.qty + "</div></div>";
+        }).join("") + "</div></div>";
+    }).join("") : '<div class="sl-raw">' + esc(b.sizes || (b.qty + " garments")) + "</div>";
+    var anyExtra = groups.some(function (g) { return g.sizes.some(function (s) { return s.extra; }); });
+    return '<section class="slip">' +
+      '<div class="sl-head"><div class="sl-num">' + esc(o.num) + '</div><div class="sl-box">BOX ' + (i + 1) + " OF " + n + "</div></div>" +
+      '<div class="sl-name">' + esc(o.orderName || o.customer || "") + "</div>" +
+      (o.orderName && o.customer ? '<div class="sl-cust">' + esc(o.customer) + "</div>" : "") +
+      '<div class="sl-meta">' + esc(b.name || "") + (b.type ? " · " + esc(b.type) : "") + "</div>" +
+      '<div class="sl-body">' + body + "</div>" +
+      '<div class="sl-tot"><span>' + (anyExtra ? "* extra, not on the order" : "") + '</span><b>' + (Number(b.qty) || 0) + " PCS IN THIS BOX</b></div>" +
+      '<div class="sl-mock">' + (mockUrl ? '<img alt="" src="' + esc(mockUrl) + '">' : '<span>NO MOCKUP</span>') + "</div>" +
+      "</section>";
+  }
+  function slipHost() {
+    var el = document.getElementById("print-slips");
+    if (!el) { el = document.createElement("div"); el.id = "print-slips"; el.setAttribute("aria-hidden", "true"); document.body.appendChild(el); }
+    return el;
+  }
+  /** Build every slip (with the mockup), wait for the picture, then open the print dialog. */
+  function printSlips(o) {
+    if (!o || state.printing) return;
+    if (!slipsReady(o)) { showToast({ kind: "err", title: "NOT EVERY GARMENT IS BOXED YET", body: "Packing slips print once every garment on the order is in a box." }); return; }
+    state.printing = true; renderMain();
+    var boxes = o.boxes.slice();
+    var mockP = getMock(o.id + ":0").catch(function () { return null; });
+    var done = function () { state.printing = false; renderMain(); };
+    mockP.then(function (url) {
+      var host = slipHost();
+      host.innerHTML = boxes.map(function (b, i) { return slipHtml(o, b, i, boxes.length, url); }).join("");
+      var img = host.querySelector(".sl-mock img");
+      var ready = img && !img.complete ? new Promise(function (r) { img.onload = img.onerror = r; setTimeout(r, 4000); }) : Promise.resolve();
+      return ready.then(function () {
+        if (!url) showToast({ kind: "unsure", title: "NO MOCKUP FOR " + o.num, body: "The slips print without a picture." });
+        done();
+        document.body.classList.add("printing-slips");   // older browsers without :has() still hide the app
+        var clear = function () { window.removeEventListener("afterprint", clear); host.innerHTML = ""; document.body.classList.remove("printing-slips"); };
+        window.addEventListener("afterprint", clear);
+        window.print();
+      });
+    }).catch(function () { done(); showToast({ kind: "err", title: "COULDN'T BUILD THE SLIPS", body: "Try again in a moment." }); });
+  }
 
   function finishBtn(o) {
     var n = o.boxes.length;
@@ -1908,6 +1994,7 @@
       var n = dupCount(d.n); if (!n) return;
       send("dup", { orderId: o.id, boxId: d.boxId, count: n, requestId: d.requestId });
     },
+    "print-slips": function () { printSlips(current()); },
     "open-fin": function () {
       var o = current(); if (!o || !o.boxes.length) return;
       state.fin = { requestId: newRequestId() };

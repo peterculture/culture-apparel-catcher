@@ -68,8 +68,12 @@ export function deliveryOf(row) {
  * Delivery Method). Salesforce answers INVALID_FIELD for the whole query when one is missing, so the
  * field it names is left out for 10 minutes and the query runs again; the board never goes down
  * for a field that isn't set up yet (11-02 lesson). */
+/* Order name (Customer_Order_Name__c, e.g. "Nashville Home Schoolers - Beetlejuice Crew Tees 21864"), for the
+ * packing slips (11-24). Optional like the others: without it a slip names the customer instead. */
+export const ORDER_NAME_FIELD = "Customer_Order_Name__c";
 const OPTIONAL_FIELDS = [
   { field: DELIVERY_FIELD, what: "Delivery Method (badges hidden)", off: 0 },
+  { field: ORDER_NAME_FIELD, what: "Order name (packing slips show the customer instead)", off: 0 },
   { field: SIZE_CHANGES_FIELD, what: "Size Changes (sizes-changed notes not shown or saved)", off: 0 },
   { field: ANSWER_FIELD, what: "Size Swap Answer (size changes read as 'print what was sent')", off: 0 },
 ];
@@ -318,6 +322,7 @@ async function buildOrders(env, orders) {
       num: plainText(o.GOA_Order_Number__c) || o.OrderNumber,
       orderNumber: o.OrderNumber,
       customer: (o.Account && o.Account.Name) || "",
+      orderName: ORDER_NAME_FIELD in o ? plainText(o[ORDER_NAME_FIELD] || "").slice(0, 160) : "",
       printDate: o.Print_Date__c || null,
       printer: (o.Printer__r && o.Printer__r.Name) || "",
       delivery: deliveryOf(o),
